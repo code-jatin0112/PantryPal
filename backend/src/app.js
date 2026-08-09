@@ -5,6 +5,7 @@ import authRoutes from "./routes/authRoutes.js";
 import pantryRoutes from "./routes/pantryRoutes.js";
 import pantryItemRoutes from "./routes/pantryItemRoutes.js";
 import { errorHandler } from "./middleware/errorHandler.js";
+import recipeRoutes from "./routes/recipeRoutes.js";
 
 const app = express();
 
@@ -23,6 +24,7 @@ app.get("/api/v1/health", (req, res) => {
 app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/pantries", pantryRoutes);
 app.use("/api/v1/pantries/:pantryId/items", pantryItemRoutes);
+app.use("/api/v1/recipes", recipeRoutes);
 
 app.use(errorHandler);
 
