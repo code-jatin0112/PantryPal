@@ -2,8 +2,9 @@ import express from "express";
 import cors from "cors";
 
 import authRoutes from "./routes/authRoutes.js";
-import { errorHandler } from "./middleware/errorHandler.js";
 import pantryRoutes from "./routes/pantryRoutes.js";
+import pantryItemRoutes from "./routes/pantryItemRoutes.js";
+import { errorHandler } from "./middleware/errorHandler.js";
 
 const app = express();
 
@@ -21,6 +22,7 @@ app.get("/api/v1/health", (req, res) => {
 
 app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/pantries", pantryRoutes);
+app.use("/api/v1/pantries/:pantryId/items", pantryItemRoutes);
 
 app.use(errorHandler);
 
