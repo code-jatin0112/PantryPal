@@ -1,6 +1,9 @@
 import express from "express";
 import cors from "cors";
 
+import authRoutes from "./routes/authRoutes.js";
+import { errorHandler } from "./middleware/errorHandler.js";
+
 const app = express();
 
 app.use(cors());
@@ -14,5 +17,9 @@ app.get("/api/v1/health", (req, res) => {
     },
   });
 });
+
+app.use("/api/v1/auth", authRoutes);
+
+app.use(errorHandler);
 
 export default app;
