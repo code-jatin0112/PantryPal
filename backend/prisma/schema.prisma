@@ -25,6 +25,7 @@ model User {
   recipes       Recipe[]
   shoppingItems ShoppingListItem[]
   mealPlans     MealPlan[]
+  favorites     RecipeFavorite[]
 }
 
 model Pantry {
@@ -72,6 +73,7 @@ model Recipe {
   shoppingItems ShoppingListItem[]
   nutrition     RecipeNutrition?
   mealPlans     MealPlan[]
+  favorites     RecipeFavorite[]
 
   @@index([userId])
 }
@@ -141,4 +143,18 @@ model MealPlan {
   @@index([recipeId])
   @@index([userId, date])
   @@index([userId, mealType])
+}
+
+model RecipeFavorite {
+  id        String   @id @default(uuid())
+  userId    String
+  recipeId  String
+  createdAt DateTime @default(now())
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  recipe Recipe @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, recipeId])
+  @@index([userId])
+  @@index([recipeId])
 }
