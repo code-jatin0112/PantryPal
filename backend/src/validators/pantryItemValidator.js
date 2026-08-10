@@ -80,3 +80,26 @@ export const updatePantryItemValidation = [
     .isISO8601()
     .withMessage("Expiry date must be a valid date"),
 ];
+
+export const adjustPantryItemValidation = [
+  param("pantryId")
+    .isUUID()
+    .withMessage("Pantry ID must be a valid UUID"),
+
+  param("itemId")
+    .isUUID()
+    .withMessage("Item ID must be a valid UUID"),
+
+  body("change")
+    .exists()
+    .withMessage("Stock change is required")
+    .isFloat()
+    .withMessage("Stock change must be a number")
+    .custom((value) => {
+      if (Number(value) === 0) {
+        throw new Error("Stock change cannot be zero");
+      }
+
+      return true;
+    }),
+];
