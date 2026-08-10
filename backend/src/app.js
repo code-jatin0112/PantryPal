@@ -10,6 +10,7 @@ import recipeIngredientRoutes from "./routes/recipeIngredientRoutes.js";
 import recipePantryMatchingRoutes from "./routes/recipePantryMatchingRoutes.js";
 import recipeNutritionRoutes from "./routes/recipeNutritionRoutes.js";
 import shoppingListRoutes from "./routes/shoppingListRoutes.js";
+import mealPlanRoutes from "./routes/mealPlanRoutes.js";
 
 const app = express();
 
@@ -42,6 +43,7 @@ app.use(
   recipeNutritionRoutes
 );
 app.use("/api/v1/shopping-list", shoppingListRoutes);
+app.use("/api/v1/meal-plans", mealPlanRoutes);
 
 app.use(errorHandler);
 
