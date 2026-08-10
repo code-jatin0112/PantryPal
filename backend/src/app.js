@@ -14,6 +14,7 @@ import mealPlanRoutes from "./routes/mealPlanRoutes.js";
 import recipeFavoriteRoutes from "./routes/recipeFavoriteRoutes.js";
 import pantryExpiryRoutes from "./routes/pantryExpiryRoutes.js";
 import pantryLowStockRoutes from "./routes/pantryLowStockRoutes.js";
+import cookingSessionRoutes from "./routes/cookingSessionRoutes.js";
 
 const app = express();
 
@@ -50,6 +51,7 @@ app.use("/api/v1/meal-plans", mealPlanRoutes);
 app.use("/api/v1/recipes", recipeFavoriteRoutes);
 app.use("/api/v1/pantries", pantryExpiryRoutes);
 app.use("/api/v1/pantries", pantryLowStockRoutes);
+app.use("/api/v1", cookingSessionRoutes);
 
 app.use(errorHandler);
 
