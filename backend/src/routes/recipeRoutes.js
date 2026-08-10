@@ -15,6 +15,14 @@ import {
   updateRecipeValidation,
 } from "../validators/recipeValidator.js";
 
+import {
+  consumeRecipe,
+} from "../controllers/recipePantryConsumptionController.js";
+
+import {
+  consumeRecipeValidation,
+} from "../validators/recipePantryConsumptionValidator.js";
+
 import { handleValidationErrors } from "../validators/authValidator.js";
 
 const router = express.Router();
@@ -29,6 +37,13 @@ router.post(
 );
 
 router.get("/", getRecipesController);
+
+router.post(
+  "/:recipeId/consume",
+  consumeRecipeValidation,
+  handleValidationErrors,
+  consumeRecipe
+);
 
 router.get(
   "/:recipeId",
