@@ -9,12 +9,20 @@ import {
 } from "../controllers/cookingSessionController.js";
 
 import {
+  completeSession,
+} from "../controllers/cookingSessionCompletionController.js";
+
+import {
   startCookingSessionValidation,
   cookingSessionIdValidation,
   updateCookingProgressValidation,
 } from "../validators/cookingSessionValidator.js";
 
 import { handleValidationErrors } from "../validators/authValidator.js";
+
+import {
+  completeCookingSessionValidation,
+} from "../validators/cookingSessionCompletionValidator.js";
 
 const router = express.Router();
 
@@ -39,6 +47,13 @@ router.patch(
   updateCookingProgressValidation,
   handleValidationErrors,
   updateProgress
+);
+
+router.post(
+  "/cooking-sessions/:sessionId/complete",
+  completeCookingSessionValidation,
+  handleValidationErrors,
+  completeSession
 );
 
 export default router;
