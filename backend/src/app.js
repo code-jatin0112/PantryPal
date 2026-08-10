@@ -8,6 +8,7 @@ import { errorHandler } from "./middleware/errorHandler.js";
 import recipeRoutes from "./routes/recipeRoutes.js";
 import recipeIngredientRoutes from "./routes/recipeIngredientRoutes.js";
 import recipePantryMatchingRoutes from "./routes/recipePantryMatchingRoutes.js";
+import recipeNutritionRoutes from "./routes/recipeNutritionRoutes.js";
 
 const app = express();
 
@@ -34,6 +35,10 @@ app.use(
 app.use(
   "/api/v1/recipes/:recipeId/pantries/:pantryId",
   recipePantryMatchingRoutes
+);
+app.use(
+  "/api/v1/recipes/:recipeId/nutrition",
+  recipeNutritionRoutes
 );
 
 app.use(errorHandler);
