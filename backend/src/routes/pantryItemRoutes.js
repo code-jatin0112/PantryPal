@@ -15,9 +15,14 @@ import {
   pantryItemIdValidation,
   createPantryItemValidation,
   updatePantryItemValidation,
+  adjustPantryItemValidation,
 } from "../validators/pantryItemValidator.js";
 
 import { handleValidationErrors } from "../validators/authValidator.js";
+
+import {
+  adjustStock,
+} from "../controllers/pantryStockAdjustmentController.js";
 
 const router = express.Router({ mergeParams: true });
 
@@ -35,6 +40,13 @@ router.get(
   pantryIdValidation,
   handleValidationErrors,
   getAll
+);
+
+router.post(
+  "/:itemId/adjust",
+  adjustPantryItemValidation,
+  handleValidationErrors,
+  adjustStock
 );
 
 router.get(

@@ -177,3 +177,74 @@ export const deletePantryItem = async ({
     },
   });
 };
+
+export const adjustPantryItemStock = async ({
+  userId,
+  pantryId,
+  itemId,
+  change,
+}) => {
+  await verifyPantryOwnership({
+    userId,
+    pantryId,
+  });
+
+  const item = await prisma.pantryItem.findFirst({
+    where: {
+      id: itemId,
+      pantryId,
+    },
+  });
+
+  if (!item) {
+    throw new AppError(
+      "Pantry item not found",
+      404,
+      "PANTRY_ITEM_NOT_FOUND"
+    );
+  }
+
+  if (change < 0) {
+    const amountToRemove = Math.abs(change);
+
+    const result = await prisma.pantryItem.updateMany({
+      where: {
+        id: itemId,
+        pantryId,
+        quantity: {
+          gte: amountToRemove,
+        },
+      },
+      data: {
+        quantity: {
+          decrement: amountToRemove,
+        },
+      },
+    });
+
+    if (result.count === 0) {
+      throw new AppError(
+        "Stock quantity cannot become negative",
+        400,
+        "INSUFFICIENT_STOCK"
+      );
+    }
+  } else {
+    await prisma.pantryItem.update({
+      where: {
+        id: itemId,
+      },
+      data: {
+        quantity: {
+          increment: change,
+        },
+      },
+    });
+  }
+
+  return prisma.pantryItem.findUnique({
+    where: {
+      id: itemId,
+    },
+  });
+};
