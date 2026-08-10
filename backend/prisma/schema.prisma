@@ -21,11 +21,12 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  pantries      Pantry[]
-  recipes       Recipe[]
-  shoppingItems ShoppingListItem[]
-  mealPlans     MealPlan[]
-  favorites     RecipeFavorite[]
+  pantries        Pantry[]
+  recipes         Recipe[]
+  shoppingItems   ShoppingListItem[]
+  mealPlans       MealPlan[]
+  favorites       RecipeFavorite[]
+  cookingSessions CookingSession[]
 }
 
 model Pantry {
@@ -58,22 +59,23 @@ model PantryItem {
 }
 
 model Recipe {
-  id            String             @id @default(uuid())
-  userId        String
-  title         String
-  description   String?
-  instructions  String
-  prepTime      Int?
-  cookTime      Int?
-  servings      Int?
-  createdAt     DateTime           @default(now())
-  updatedAt     DateTime           @updatedAt
-  user          User               @relation(fields: [userId], references: [id], onDelete: Cascade)
-  ingredients   RecipeIngredient[]
-  shoppingItems ShoppingListItem[]
-  nutrition     RecipeNutrition?
-  mealPlans     MealPlan[]
-  favorites     RecipeFavorite[]
+  id              String             @id @default(uuid())
+  userId          String
+  title           String
+  description     String?
+  instructions    String
+  prepTime        Int?
+  cookTime        Int?
+  servings        Int?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  user            User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ingredients     RecipeIngredient[]
+  shoppingItems   ShoppingListItem[]
+  nutrition       RecipeNutrition?
+  mealPlans       MealPlan[]
+  favorites       RecipeFavorite[]
+  cookingSessions CookingSession[]
 
   @@index([userId])
 }
@@ -157,4 +159,25 @@ model RecipeFavorite {
   @@unique([userId, recipeId])
   @@index([userId])
   @@index([recipeId])
+}
+
+model CookingSession {
+  id          String    @id @default(uuid())
+  userId      String
+  recipeId    String
+  servings    Int
+  status      String    @default("active")
+  currentStep Int       @default(1)
+  totalSteps  Int
+  startedAt   DateTime  @default(now())
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  recipe Recipe @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([recipeId])
+  @@index([userId, status])
 }
