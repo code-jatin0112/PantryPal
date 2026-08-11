@@ -15,6 +15,7 @@ import recipeFavoriteRoutes from "./routes/recipeFavoriteRoutes.js";
 import pantryExpiryRoutes from "./routes/pantryExpiryRoutes.js";
 import pantryLowStockRoutes from "./routes/pantryLowStockRoutes.js";
 import cookingSessionRoutes from "./routes/cookingSessionRoutes.js";
+import aiRecipeRoutes from "./routes/aiRecipeRoutes.js";
 
 const app = express();
 
@@ -52,6 +53,7 @@ app.use("/api/v1/recipes", recipeFavoriteRoutes);
 app.use("/api/v1/pantries", pantryExpiryRoutes);
 app.use("/api/v1/pantries", pantryLowStockRoutes);
 app.use("/api/v1", cookingSessionRoutes);
+app.use("/api/v1/ai", aiRecipeRoutes);
 
 app.use(errorHandler);
 
