@@ -10,6 +10,11 @@ export const generateAIRecipeValidation = [
     .isInt({ min: 1, max: 20 })
     .withMessage("Servings must be an integer between 1 and 20"),
 
+  body("budget")
+    .optional()
+    .isFloat({ gt: 0 })
+    .withMessage("Budget must be greater than 0"),
+
   body("preferences")
     .optional()
     .trim()
