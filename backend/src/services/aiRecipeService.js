@@ -18,6 +18,7 @@ export const generateRecipeFromPantry = async ({
   userId,
   pantryId,
   servings,
+  budget,
   preferences,
 }) => {
   const pantry = await prisma.pantry.findFirst({
@@ -55,6 +56,7 @@ export const generateRecipeFromPantry = async ({
   const prompt = buildRecipeGenerationPrompt({
     pantryContext,
     servings,
+    budget,
     preferences,
   });
 
@@ -74,6 +76,8 @@ Important rules:
 - Suggest useful substitutions when appropriate.
 - Do not modify, deduct, or otherwise change pantry data.
 - Generate realistic quantities and cooking instructions.
+- If a budget is provided, keep the estimated recipe cost within that budget.
+- Return the estimated cost as a numeric value in the same currency context as the budget.
 - Return only the structured response matching the schema.
     `.trim(),
 
@@ -81,6 +85,17 @@ Important rules:
 
     responseSchema: aiRecipeResponseSchema,
   });
+
+  if (
+    budget !== undefined &&
+    recipe.estimatedCost > budget
+  ) {
+    throw new AppError(
+      "Generated recipe exceeds the requested budget",
+      422,
+      "RECIPE_BUDGET_EXCEEDED"
+    );
+  }
 
   return {
     pantry: {

@@ -25,6 +25,7 @@ export const buildPantryContext = (pantry) => {
 export const buildRecipeGenerationPrompt = ({
   pantryContext,
   servings,
+  budget,
   preferences,
 }) => {
   return `
@@ -35,6 +36,9 @@ ${JSON.stringify(pantryContext, null, 2)}
 
 Requested servings:
 ${servings ?? "Use a reasonable serving size"}
+
+Budget:
+${budget !== undefined ? budget : "No budget constraint provided"}
 
 User preferences:
 ${preferences || "None provided"}

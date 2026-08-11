@@ -7,6 +7,9 @@ export const aiRecipeResponseSchema = {
     description: {
       type: "string",
     },
+    estimatedCost: {
+      type: "number",
+    },
     servings: {
       type: "integer",
     },
@@ -68,6 +71,7 @@ export const aiRecipeResponseSchema = {
   required: [
     "title",
     "description",
+    "estimatedCost",
     "servings",
     "prepTime",
     "cookTime",

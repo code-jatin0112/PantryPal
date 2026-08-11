@@ -12,6 +12,7 @@ export const generateAIRecipeController = async (
       userId: req.user.id,
       pantryId: req.body.pantryId,
       servings: req.body.servings,
+      budget: req.body.budget,
       preferences: req.body.preferences,
     });
 
