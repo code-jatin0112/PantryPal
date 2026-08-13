@@ -2,7 +2,7 @@
 
 ## Product Requirements Document (PRD)
 
-**Version:** 1.1
+**Version:** 1.2
 **Status:** Final Draft
 **Product Type:** AI-powered pantry and meal management application
 
@@ -380,37 +380,77 @@ and recommends suitable meals.
 
 Users can provide practical constraints when searching for meals.
 
-## 13.1 Number of Servings
+## 13.1 Meal Size and Multi-Dish Planning
 
-Users can specify:
+Users may specify both the number of people eating and the dishes they want to prepare.
 
-> **I want to cook for 4 people.**
+The number of people and the number of dishes are independent planning inputs.
 
-PantryPal adjusts ingredient quantities accordingly.
+PantryPal must support:
+
+- A single person preparing multiple dishes
+- Multiple people sharing multiple dishes
+- Family meals
+- Small gatherings
+- House parties
+- Large meal occasions
+
+The user is not required to use the same serving quantity for every dish.
 
 Example:
 
-### Base Recipe
-
-Serves 2:
-
 ```text
-Pasta: 200g
-Chicken: 200g
-Tomato: 2
+People: 11
+
+Pizza: 10 servings
+Pasta: 11 servings
+Garlic Bread: 15 servings
 ```
 
-### User requests 4 servings
+PantryPal must preserve the user's selected serving quantity for each dish rather than automatically changing every dish to match the number of people.
+
+Each dish must be evaluated independently for:
+
+- Serving coverage
+- Pantry availability
+- Required ingredient quantities
+- Missing quantities
+- Estimated additional cost
+- Budget compatibility
+- Potential food waste
+
+The user may intentionally request fewer or more servings than the number of people. PantryPal should warn about possible shortage or waste without silently overriding the user's decision.
+
+### Serving Coverage Warnings
+
+Each dish should receive one of three deterministic warning levels:
+
+- 🟢 **Balanced** — serving quantity is reasonably aligned with intended consumption.
+- 🟡 **Warning** — serving quantity differs noticeably from the people count and may result in smaller portions or unused food.
+- 🔴 **Critical** — serving quantity creates a significant risk of shortage or substantial food waste.
+
+Warnings must distinguish:
+
+- **Shortage risk** — a dish may not provide enough portions.
+- **Potential waste** — a dish may produce substantially more food than expected.
+
+Warnings must not prevent the user from continuing.
+
+The system must not consider a multi-dish meal fully covered merely because the combined number of servings is sufficient. A particular dish may still be insufficient.
+
+Example:
 
 ```text
-Pasta: 400g
-Chicken: 400g
-Tomato: 4
+People: 12
+
+Pizza: 12 servings
+Pasta: 12 servings
+Garlic Bread: 5 servings
 ```
 
-The system should also compare the required quantities with the user's pantry.
+Garlic Bread must be evaluated independently and receive an appropriate shortage warning.
 
----
+Critical quantity and serving calculations must be deterministic backend logic and must not depend solely on AI judgment.
 
 ## 13.2 Cooking Time
 
@@ -492,6 +532,49 @@ Example:
 * Capsicum
 
 ---
+
+### Multiple Recommendation Options
+
+PantryPal should provide multiple suitable recipe options when the user asks for recommendations.
+
+Users must be able to reject a recommendation and request alternatives while retaining active constraints unless they explicitly change them.
+
+### Specific Recipe Requests
+
+Users may request a specific recipe such as pizza, burger, biryani, or pasta.
+
+For a specific recipe request, PantryPal should provide:
+
+- Recipe ingredients
+- Required quantities
+- Requested servings
+- Ingredients already available
+- Partially available ingredients
+- Missing ingredients
+- Additional quantities required
+- Estimated additional cost
+- Budget compatibility
+- Suitable substitutions where appropriate
+
+If the requested recipe exceeds the budget, PantryPal should explain the issue and may offer lower-cost substitutions, a smaller serving quantity, or alternative recipes within budget.
+
+### Cuisine Selection
+
+Cuisine should be available as a meal-level or individual-dish preference.
+
+The user may request multiple dishes from one cuisine, different cuisines for different dishes, or no cuisine preference.
+
+Example:
+
+```text
+People: 6
+
+Dish 1: Indian
+Dish 2: Italian
+Dish 3: Mexican
+```
+
+The system must not assume all dishes use the same cuisine.
 
 # 15. AI Kitchen Assistant
 
@@ -622,6 +705,36 @@ Remaining: ₹140
 ```
 
 ---
+
+### Multi-Dish Budget Aggregation
+
+For a multi-dish meal, PantryPal should calculate estimated additional cost for each dish and the total additional grocery cost.
+
+```text
+Dish 1 additional cost
++
+Dish 2 additional cost
++
+Dish 3 additional cost
+=
+Total additional grocery cost
+```
+
+The total should be compared with the user's available budget.
+
+### Location-Aware Pricing
+
+Ingredient prices may vary by city or region, store, brand, pack size, season, promotions, and date.
+
+AI-generated prices must therefore not be presented as exact real-world prices.
+
+Where reliable current pricing data is available, PantryPal should use location-aware pricing. Otherwise, it should provide an estimate and clearly label it as approximate.
+
+### Deterministic Budget Validation
+
+If a generated or specifically requested recipe exceeds an explicit user budget, the backend must detect this deterministically, explain the difference, and offer a cheaper alternative or allow the user to change the budget.
+
+PantryPal must never silently claim an over-budget recipe is within budget.
 
 # 20. Cooking Mode
 
@@ -809,6 +922,7 @@ The MVP must focus on the core PantryPal experience.
 * Cooking-time filtering
 * Budget-aware recommendations
 * Preference filtering
+* Basic per-recipe and per-serving nutrition estimation
 
 ## AI
 
@@ -845,7 +959,7 @@ The following should not block the initial release:
 * Household collaboration
 * Payment systems
 * Native mobile applications
-* Advanced nutrition tracking
+* Advanced nutrition tracking and long-term nutrition analytics
 * Sophisticated machine-learning recommendation models
 
 These can be evaluated after the core product is stable.
@@ -915,6 +1029,42 @@ The system shall update pantry quantities after confirmed ingredient usage.
 The system shall consider the user's specified food budget when generating meal recommendations.
 
 ---
+
+### FR-16 — Multi-Dish Meal Planning
+
+The system shall support meal planning for any number of people and any number of dishes.
+
+### FR-17 — Independent Dish Servings
+
+The system shall allow a different serving quantity to be specified for each dish.
+
+### FR-18 — Serving Coverage Warnings
+
+The system shall identify balanced, warning, and critical serving coverage states and distinguish shortage risk from potential food waste.
+
+### FR-19 — Multiple Recommendations
+
+The system shall provide multiple suitable recipe options and allow users to request alternatives.
+
+### FR-20 — Specific Recipe Requests
+
+The system shall support specific recipe requests and compare recipe requirements with pantry availability, missing quantities, estimated cost, and budget.
+
+### FR-21 — Cuisine Selection
+
+The system shall support cuisine preferences at meal-plan and individual-dish level.
+
+### FR-22 — Multi-Dish Grocery Aggregation
+
+The system shall aggregate overlapping missing ingredients across selected dishes to avoid duplicate grocery requirements.
+
+### FR-23 — Budget Validation
+
+The system shall deterministically validate recipe and multi-dish meal costs against an explicit user budget.
+
+### FR-24 — Nutrition Estimation
+
+The system shall provide basic estimated nutrition values per recipe and per serving where reliable nutrition data is available. Nutrition values shall be calculated for the user's actual requested serving quantity and recalculated when ingredient quantities or material substitutions change. When reliable data is unavailable, the system shall clearly identify the values as approximate and avoid false precision.
 
 # 27. Non-Functional Requirements
 
@@ -1040,7 +1190,7 @@ Example:
 
 ## 29.7 Real-World Quantities
 
-Recipe quantities should account for the actual number of people being served rather than assuming a fixed serving size.
+Recipe quantities should account for the user's requested serving quantity for each dish, while also considering the number of people being served to identify potential shortage or food waste.
 
 ---
 
@@ -1112,6 +1262,89 @@ and recommends suitable meals.
 PantryPal prioritizes meals that can realistically be prepared within that time.
 
 ---
+
+### Additional Meal Planning Scenarios
+
+#### Single User With Multiple Dishes
+
+```text
+People: 1
+
+Omelette: 1 serving
+Toast: 1 serving
+Fruit bowl: 1 serving
+```
+
+#### Party With Independent Serving Quantities
+
+```text
+Guests: 11
+
+Pizza: 10 servings
+Pasta: 11 servings
+Garlic Bread: 15 servings
+Dessert: 12 servings
+```
+
+PantryPal should evaluate every dish independently and warn about potential shortage or waste without silently changing the user's selections.
+
+#### Mixed Cuisine Meal
+
+```text
+People: 4
+
+Dish 1: Indian
+Dish 2: Italian
+Dish 3: Mexican
+```
+
+#### Specific Recipe Request
+
+```text
+I want to make pizza for 4 people with a ₹500 budget.
+```
+
+PantryPal should identify available ingredients, missing ingredients, estimated additional cost, and budget compatibility.
+
+#### Rejected Recommendation
+
+```text
+I don't want this. Show me another option.
+```
+
+The replacement should preserve active constraints unless they are changed.
+
+#### Party Shortage
+
+```text
+Guests: 12
+Garlic Bread: 5 servings
+```
+
+PantryPal should warn that this particular dish may not provide enough portions.
+
+#### Party Potential Waste
+
+```text
+Guests: 12
+Dessert: 25 servings
+```
+
+PantryPal should warn about potential excess food while allowing the user to continue intentionally.
+
+### Nutrition Estimation Principle
+
+Nutrition values should be treated as estimates rather than guaranteed exact real-world values.
+
+Nutrition can vary because of ingredient brands and varieties, raw versus cooked weights, preparation method, oil absorption, portion size, and substitutions.
+
+Where reliable nutrition data is available, PantryPal should calculate nutrition deterministically from normalized ingredients and quantities.
+
+AI may assist with ingredient interpretation, but should not be the sole authority for nutrition arithmetic.
+
+Nutrition should be calculated for the actual requested serving quantity and recalculated when substitutions materially change the ingredients.
+
+When reliable data is unavailable, the UI should clearly indicate that the nutrition value is approximate and should avoid false precision.
 
 # 31. Product Architecture Direction
 
