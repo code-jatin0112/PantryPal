@@ -2,8 +2,8 @@
 
 ## Low-Level Design (LLD)
 
-**Version:** 1.0
-**Status:** Draft
+**Version:** 1.1
+**Status:** Final Draft
 
 ---
 
@@ -169,6 +169,10 @@ Authentication
 Pantry Management
       ↓
 Recipe System
+      ↓
+Meal Planning
+      ↓
+Deterministic Meal Calculations
       ↓
 AI Recommendations
       ↓
@@ -429,6 +433,7 @@ Potential controllers include:
 - groceryController
 - cookingController
 - mealController
+- mealPlanningController
 
 Controllers should coordinate requests and responses without containing complex business logic.
 
@@ -463,6 +468,7 @@ Potential route modules include:
 - groceryRoutes
 - cookingRoutes
 - mealRoutes
+- mealPlanningRoutes
 
 Routes should remain lightweight and delegate work to controllers.
 
@@ -478,6 +484,13 @@ Potential services include:
 - groceryService
 - cookingService
 - mealService
+- mealPlanningService
+- servingCalculationService
+- pantryMatchingService
+- budgetService
+- nutritionService
+- groceryAggregationService
+- recommendationService
 - aiService
 
 This layer is responsible for coordinating business operations.
@@ -494,6 +507,8 @@ Potential validation areas include:
 - recipes
 - grocery items
 - meal plans
+- meal plan dishes
+- multi-dish planning requests
 - cooking sessions
 - AI recommendation requests
 
@@ -660,10 +675,19 @@ Cooking
 Meal Planning
       │
       ├── Meal Plans
-      └── Scheduled Meals
+      ├── People Count
+      ├── Dish Planning
+      ├── Independent Dish Constraints
+      ├── Serving Calculation
+      ├── Serving Coverage
+      ├── Pantry Matching
+      ├── Budget Validation
+      ├── Nutrition Estimation
+      └── Grocery Aggregation
 
 AI
       │
+      ├── Intent Interpretation
       ├── Prompt Construction
       ├── LLM Integration
       ├── Structured Output
@@ -673,6 +697,57 @@ AI
 Each module should expose only the functionality required by other modules.
 
 Internal implementation details should remain encapsulated within the module.
+
+---
+
+### 6.1 Meal Planning Service Boundaries
+
+The meal-planning domain contains deterministic services with focused responsibilities.
+
+```text
+Meal Planning Service
+        │
+        ├── Serving Calculation Service
+        ├── Pantry Matching Service
+        ├── Budget Service
+        ├── Nutrition Service
+        └── Grocery Aggregation Service
+```
+
+The Meal Planning Service coordinates these services for a meal plan containing one or more dishes.
+
+Each dish may independently contain:
+
+- Requested serving quantity
+- Cuisine
+- Recipe preference
+- Dietary requirements
+- Budget priority
+- Other applicable preferences
+
+The number of people and the number of dishes are independent inputs.
+
+---
+
+### 6.2 Deterministic Meal Planning Rules
+
+Critical calculations must be implemented as backend business logic.
+
+The backend shall:
+
+1. Scale recipe ingredients from base servings to requested servings.
+2. Compare scaled requirements with pantry quantities.
+3. Calculate missing quantities.
+4. Evaluate each dish's serving coverage against the people count.
+5. Identify shortage and potential waste risks.
+6. Calculate estimated additional ingredient cost.
+7. Validate explicit budget constraints.
+8. Aggregate overlapping grocery requirements across dishes.
+9. Calculate nutrition estimates from normalized ingredient data when reliable data is available.
+
+The same calculations must be used regardless of whether the request originated from a form or from natural-language AI input.
+
+AI may interpret intent and recommend options, but it must not be the sole authority for arithmetic or critical validation.
 
 ---
 
@@ -892,6 +967,8 @@ A meal plan belongs to a user.
 | name | VARCHAR | NOT NULL | Meal plan name |
 | start_date | DATE | NOT NULL | Plan start date |
 | end_date | DATE | NOT NULL | Plan end date |
+| people_count | INTEGER | NOT NULL | Number of people being served |
+| budget | DECIMAL | NULL | Optional total meal-plan budget |
 | created_at | TIMESTAMP | NOT NULL | Creation time |
 | updated_at | TIMESTAMP | NOT NULL | Last update time |
 
@@ -908,10 +985,31 @@ Meal plan items connect recipes to specific dates or meal slots.
 | recipe_id | UUID | FK → recipes.id | Selected recipe |
 | planned_date | DATE | NOT NULL | Planned cooking date |
 | meal_type | VARCHAR | NOT NULL | Breakfast/lunch/dinner/etc. |
-| servings | INTEGER | NOT NULL | Planned servings |
+| requested_servings | INTEGER | NOT NULL | User-requested servings for this dish |
+| cuisine | VARCHAR | NULL | Dish-level cuisine preference |
+| recipe_preference | VARCHAR | NULL | Requested recipe or dish preference |
+| dietary_requirements | JSONB | NULL | Dish-level dietary requirements |
+| budget_priority | VARCHAR | NULL | Dish-level budget priority |
+| other_preferences | JSONB | NULL | Other dish-level preferences |
 | created_at | TIMESTAMP | NOT NULL | Creation time |
 
 This allows one meal plan to contain multiple planned meals.
+
+The `people_count` on the meal plan and `requested_servings` on each meal-plan item must remain independent.
+
+For example:
+
+```text
+People: 11
+
+Pizza: 10 servings
+Pasta: 11 servings
+Garlic Bread: 15 servings
+```
+
+The backend must preserve these requested values and calculate serving coverage separately for each dish.
+
+The application must not silently overwrite a dish's requested serving quantity to match the people count.
 
 ---
 
@@ -958,6 +1056,19 @@ users
                                   +-- N : 1 -- recipes
                                                   |
                                                   +-- 1 : N -- recipe_ingredients
+
+meal_plan
+   |
+   +-- people_count
+   |
+   +-- meal_plan_items
+          |
+          +-- requested_servings
+          +-- cuisine
+          +-- recipe_preference
+          +-- dietary_requirements
+          +-- budget_priority
+          +-- other_preferences
 
 ---
 
@@ -1015,6 +1126,9 @@ Examples include:
 - Cooking time cannot be negative.
 - Meal plan end date cannot precede start date.
 - User-owned resources must reference valid users.
+- `people_count` must be greater than zero.
+- `requested_servings` must be greater than zero.
+- Dish-level budget priority must use a supported value when provided.
 
 Validation should exist at both the application and database levels where appropriate.
 
@@ -1035,6 +1149,7 @@ Initial candidates include:
 - `meal_plans.user_id`
 - `meal_plan_items.meal_plan_id`
 - `meal_plan_items.planned_date`
+- `meal_plan_items.recipe_id`
 - `recipe_ingredients.recipe_id`
 
 The unique constraint on `users.email` will also provide an index suitable for login lookup.
@@ -1963,7 +2078,303 @@ Serving calculations must be deterministic and must not depend on the LLM.
 
 ---
 
-### 8.7 AI Recommendation APIs
+### 8.7 Multi-Dish Meal Planning APIs
+
+Meal planning APIs preserve the distinction between the number of people and the requested serving quantity of each dish.
+
+---
+
+### 8.7.1 Create Multi-Dish Meal Plan
+
+**Endpoint**
+
+`POST /api/v1/meal-plans`
+
+**Authentication**
+
+Required.
+
+**Request Body**
+
+```json
+{
+  "name": "Dinner Party",
+  "peopleCount": 11,
+  "budget": 1500,
+  "dishes": [
+    {
+      "requestedServings": 10,
+      "cuisine": "Indian",
+      "recipePreference": "Pizza",
+      "dietaryRequirements": ["vegetarian"],
+      "budgetPriority": "medium",
+      "otherPreferences": []
+    },
+    {
+      "requestedServings": 11,
+      "cuisine": "Italian",
+      "recipePreference": "Pasta",
+      "dietaryRequirements": [],
+      "budgetPriority": "high",
+      "otherPreferences": []
+    }
+  ]
+}
+```
+
+The backend must validate the meal plan and each dish independently.
+
+**Success Response**
+
+**Status:** `201 Created`
+
+```json
+{
+  "success": true,
+  "data": {
+    "id": "plan-id",
+    "name": "Dinner Party",
+    "peopleCount": 11,
+    "budget": 1500,
+    "dishes": [
+      {
+        "id": "dish-id-1",
+        "requestedServings": 10,
+        "cuisine": "Indian",
+        "recipePreference": "Pizza",
+        "dietaryRequirements": ["vegetarian"],
+        "budgetPriority": "medium"
+      }
+    ]
+  }
+}
+```
+
+---
+
+### 8.7.2 Evaluate Meal Plan
+
+**Endpoint**
+
+`POST /api/v1/meal-plans/:planId/evaluate`
+
+**Authentication**
+
+Required.
+
+**Purpose**
+
+Runs deterministic meal-planning calculations for every dish in the plan.
+
+The backend evaluates:
+
+- Serving coverage
+- Pantry availability
+- Required quantities
+- Missing quantities
+- Estimated additional cost
+- Budget compatibility
+- Potential food waste
+
+The number of people must not be used to overwrite requested dish servings.
+
+**Success Response**
+
+**Status:** `200 OK`
+
+```json
+{
+  "success": true,
+  "data": {
+    "peopleCount": 11,
+    "budget": 1500,
+    "dishes": [
+      {
+        "dishId": "dish-id-1",
+        "requestedServings": 10,
+        "servingCoverage": "warning",
+        "shortageRisk": true,
+        "potentialWaste": false,
+        "missingIngredients": [],
+        "estimatedAdditionalCost": 450,
+        "budgetCompatible": true
+      }
+    ],
+    "groceryRequirements": []
+  }
+}
+```
+
+Serving coverage values must be deterministic and should distinguish shortage risk from potential waste.
+
+---
+
+### 8.7.3 Calculate Recipe Servings
+
+**Endpoint**
+
+`POST /api/v1/meal-plans/:planId/dishes/:dishId/servings`
+
+**Authentication**
+
+Required.
+
+**Purpose**
+
+Calculates scaled recipe ingredient quantities for the dish's requested serving quantity.
+
+The backend uses:
+
+```text
+Multiplier = Requested Servings / Base Recipe Servings
+```
+
+The calculation must be deterministic.
+
+**Success Response**
+
+**Status:** `200 OK`
+
+```json
+{
+  "success": true,
+  "data": {
+    "requestedServings": 10,
+    "ingredients": [
+      {
+        "name": "Pasta",
+        "quantity": 1000,
+        "unit": "grams"
+      }
+    ]
+  }
+}
+```
+
+---
+
+### 8.7.4 Aggregate Missing Grocery Requirements
+
+**Endpoint**
+
+`POST /api/v1/meal-plans/:planId/grocery-requirements`
+
+**Authentication**
+
+Required.
+
+**Purpose**
+
+Aggregates missing ingredients across all selected dishes.
+
+If multiple dishes require the same ingredient, compatible quantities should be combined instead of creating duplicate grocery requirements.
+
+**Success Response**
+
+**Status:** `200 OK`
+
+```json
+{
+  "success": true,
+  "data": {
+    "items": [
+      {
+        "name": "Tomato",
+        "quantity": 8,
+        "unit": "pieces",
+        "sourceDishIds": ["dish-1", "dish-2"]
+      }
+    ]
+  }
+}
+```
+
+The aggregation must be deterministic and must not rely solely on AI.
+
+---
+
+### 8.7.5 Validate Meal Plan Budget
+
+**Endpoint**
+
+`POST /api/v1/meal-plans/:planId/budget/validate`
+
+**Authentication**
+
+Required.
+
+**Purpose**
+
+Validates the estimated additional cost of the meal plan against its explicit budget.
+
+**Success Response**
+
+**Status:** `200 OK`
+
+```json
+{
+  "success": true,
+  "data": {
+    "budget": 1500,
+    "estimatedAdditionalCost": 1320,
+    "remainingBudget": 180,
+    "compatible": true
+  }
+}
+```
+
+Budget arithmetic must be performed by backend business logic.
+
+---
+
+### 8.7.6 Estimate Meal Nutrition
+
+**Endpoint**
+
+`POST /api/v1/meal-plans/:planId/nutrition`
+
+**Authentication**
+
+Required.
+
+**Purpose**
+
+Provides estimated nutrition values for the selected dishes when reliable nutrition data is available.
+
+Nutrition is calculated for the actual requested serving quantity.
+
+When reliable data is unavailable, the response must identify the values as approximate and avoid false precision.
+
+**Success Response**
+
+**Status:** `200 OK`
+
+```json
+{
+  "success": true,
+  "data": {
+    "dishes": [
+      {
+        "dishId": "dish-id-1",
+        "requestedServings": 10,
+        "approximate": true,
+        "perServing": {
+          "calories": 420,
+          "proteinGrams": 18,
+          "carbohydrateGrams": 52,
+          "fatGrams": 15
+        }
+      }
+    ]
+  }
+}
+```
+
+Nutrition arithmetic must be performed by deterministic backend logic when normalized ingredient data is available.
+
+---
+
+### 8.8 AI Recommendation APIs
 
 AI recommendation endpoints allow users to describe what they want to cook using natural language.
 
@@ -1989,10 +2400,19 @@ Generates recipe recommendations using the user's pantry inventory and optional 
 
 ```json
 {
-  "prompt": "I want something quick and healthy for dinner",
-  "servings": 2,
+  "prompt": "I need dinner for 11 people",
+  "peopleCount": 11,
+  "dishes": [
+    {
+      "requestedServings": 10,
+      "cuisine": "Indian",
+      "recipePreference": "Pizza",
+      "dietaryRequirements": ["vegetarian"],
+      "budgetPriority": "medium"
+    }
+  ],
   "maxCookingMinutes": 30,
-  "budget": 150
+  "budget": 1500
 }
 ```
 
@@ -2017,15 +2437,19 @@ Fetch Pantry Data
      ↓
 Fetch User Preferences
      ↓
-Build AI Context
+Build Controlled AI Context
      ↓
 Generate Structured Prompt
      ↓
 Call LLM
      ↓
-Validate AI Response
+Validate AI Response Schema
      ↓
 Normalize Recommendation
+     ↓
+Run Deterministic Meal Calculations
+     ↓
+Validate Budget / Pantry / Serving Results
      ↓
 Return Response
 ```
@@ -2179,9 +2603,19 @@ Database
 
 This ensures AI remains an assistant rather than an uncontrolled system actor.
 
+For meal planning, the backend must treat AI output as input to deterministic application logic. The backend remains authoritative for:
+
+- Serving arithmetic
+- Pantry quantity comparison
+- Missing quantities
+- Serving coverage warnings
+- Budget validation
+- Grocery aggregation
+- Nutrition arithmetic where reliable data exists
+
 ---
 
-### 8.7.5 AI Failure Response
+### 8.8.5 AI Failure Response
 
 If the external AI provider fails, the backend should return a controlled error.
 
@@ -2501,7 +2935,12 @@ Required.
   "recipeId": "recipe-id",
   "plannedDate": "2026-08-12",
   "mealType": "dinner",
-  "servings": 2
+  "requestedServings": 2,
+  "cuisine": "Italian",
+  "recipePreference": "Pasta",
+  "dietaryRequirements": ["vegetarian"],
+  "budgetPriority": "medium",
+  "otherPreferences": []
 }
 ```
 
@@ -2742,6 +3181,23 @@ A user must never be able to access or modify another user's:
 - Private AI interaction records
 
 Authorization checks must be performed on the backend even if the frontend hides unauthorized resources.
+
+---
+
+### 8.11 Multi-Dish Validation Rules
+
+Meal-planning request validation must enforce:
+
+- `peopleCount` must be a positive integer.
+- At least one dish must be provided when creating a multi-dish meal plan.
+- `requestedServings` must be a positive integer.
+- Dish constraints are optional individually but must use supported values when supplied.
+- Budget values must not be negative.
+- Recipe serving calculations must reject zero or negative base servings.
+- Pantry quantities used for matching must not be negative.
+- A serving coverage warning must never silently modify the requested serving quantity.
+
+Validation should occur before deterministic calculation services execute.
 
 ---
 
@@ -4255,6 +4711,51 @@ The frontend follows:
 ---
 
 ## 13. Testing Strategy
+
+### 13.1 Meal Planning Testing Requirements
+
+Deterministic meal-planning services must have focused automated tests.
+
+At minimum, tests should cover:
+
+- Scaling recipe quantities for different requested servings
+- Independent serving quantities across multiple dishes
+- Serving coverage states
+- Shortage risk detection
+- Potential waste detection
+- Pantry quantity matching
+- Missing quantity calculation
+- Budget validation
+- Aggregation of overlapping grocery requirements
+- Nutrition calculation with normalized ingredient data
+- Approximate nutrition handling when data is unavailable
+- Validation of invalid or negative quantities
+- Preservation of user-selected serving quantities
+
+Example scenario:
+
+```text
+People: 12
+
+Pizza: 12 servings
+Pasta: 12 servings
+Garlic Bread: 5 servings
+```
+
+The test must verify that Garlic Bread is evaluated independently and receives an appropriate shortage warning.
+
+Another scenario:
+
+```text
+People: 12
+
+Dessert: 25 servings
+```
+
+The test must verify that potential excess food is identified without changing the requested 25 servings.
+
+AI integration tests should also verify that invalid or inconsistent AI output cannot bypass deterministic backend validation.
+
 
 PantryPal will use automated testing to verify application behavior and reduce regressions during development.
 
