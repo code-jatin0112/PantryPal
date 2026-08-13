@@ -24,9 +24,9 @@ model User {
   pantries        Pantry[]
   recipes         Recipe[]
   shoppingItems   ShoppingListItem[]
-  mealPlans       MealPlan[]
   favorites       RecipeFavorite[]
   cookingSessions CookingSession[]
+  mealPlans       MealPlan[]
 }
 
 model Pantry {
@@ -73,9 +73,9 @@ model Recipe {
   ingredients     RecipeIngredient[]
   shoppingItems   ShoppingListItem[]
   nutrition       RecipeNutrition?
-  mealPlans       MealPlan[]
   favorites       RecipeFavorite[]
   cookingSessions CookingSession[]
+  mealPlanItems   MealPlanItem[]
 
   @@index([userId])
 }
@@ -129,22 +129,45 @@ model ShoppingListItem {
 }
 
 model MealPlan {
-  id        String   @id @default(uuid())
-  userId    String
-  recipeId  String
-  date      DateTime
-  mealType  String
-  notes     String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id          String   @id @default(uuid())
+  userId      String
+  name        String
+  startDate   DateTime
+  endDate     DateTime
+  peopleCount Int
+  budget      Float?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  recipe Recipe @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  user  User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items MealPlanItem[]
 
   @@index([userId])
+  @@index([userId, startDate])
+  @@index([userId, endDate])
+}
+
+model MealPlanItem {
+  id                  String   @id @default(uuid())
+  mealPlanId          String
+  recipeId            String
+  plannedDate         DateTime
+  mealType            String
+  requestedServings   Int
+  cuisine             String?
+  recipePreference    String?
+  dietaryRequirements Json?
+  budgetPriority      String?
+  otherPreferences    Json?
+  createdAt           DateTime @default(now())
+
+  mealPlan MealPlan @relation(fields: [mealPlanId], references: [id], onDelete: Cascade)
+  recipe   Recipe   @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+
+  @@index([mealPlanId])
   @@index([recipeId])
-  @@index([userId, date])
-  @@index([userId, mealType])
+  @@index([plannedDate])
+  @@index([mealPlanId, plannedDate])
 }
 
 model RecipeFavorite {

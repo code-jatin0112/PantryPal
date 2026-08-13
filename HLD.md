@@ -1,8 +1,8 @@
 # PantryPal
 ## High-Level Design (HLD)
 
-**Version:** 1.0  
-**Status:** Draft
+**Version:** 1.1
+**Status:** Final Draft
 
 ---
 
@@ -29,6 +29,9 @@ The architecture is designed around the following goals:
 - Support for future scalability
 - Simple deployment and development workflow
 - Ability to evolve the product without requiring a complete architectural rewrite
+- Deterministic handling of critical meal-planning calculations
+- Clear separation between AI interpretation and backend business logic
+- Support for multi-dish meal planning with independent dish constraints
 
 ---
 
@@ -370,6 +373,24 @@ Potential services include:
 
 The service layer coordinates operations between the API layer, databases, and external services.
 
+#### Meal Planning Services
+
+The meal-planning domain will be divided into focused services so that critical calculations remain deterministic and testable.
+
+Potential services include:
+
+- Meal Planning Service
+- Serving Calculation Service
+- Pantry Matching Service
+- Budget Service
+- Nutrition Service
+- Grocery Aggregation Service
+- Recommendation Service
+
+The Meal Planning Service coordinates these services when processing a meal plan containing one or more dishes.
+
+The architecture must allow each dish to have its own serving quantity, cuisine, recipe preference, dietary requirements, budget priority, and other applicable preferences.
+
 ---
 
 ### 5.6 Data Access Layer
@@ -411,7 +432,27 @@ Relationships between these entities will be modeled using primary keys and fore
 
 ---
 
-### 5.8 MongoDB Data Store
+### 5.8 Deterministic Meal Planning Logic
+
+Critical meal-planning calculations shall be performed by backend business logic rather than delegated solely to the AI service.
+
+The backend is responsible for:
+
+- Scaling recipe ingredients according to requested servings
+- Comparing required quantities with pantry quantities
+- Calculating missing quantities
+- Evaluating serving coverage
+- Identifying shortage and potential waste risks
+- Calculating estimated additional ingredient cost
+- Validating budget constraints
+- Aggregating overlapping grocery requirements
+- Calculating nutrition estimates from normalized ingredient data where reliable data is available
+
+AI may interpret natural-language requests and provide recommendations, but it must not be the sole authority for arithmetic or critical validation.
+
+---
+
+### 5.9 MongoDB Data Store
 
 MongoDB will store data that benefits from a flexible document structure.
 
@@ -538,6 +579,44 @@ Potential responsibilities include:
 - Performing periodic maintenance tasks
 
 The exact scheduling mechanism will be determined during implementation based on actual product requirements.
+
+---
+
+## 5.10 Multi-Dish Meal Planning Model
+
+A meal plan may contain multiple dishes, and the number of people and number of dishes are independent planning inputs.
+
+Conceptually:
+
+```text
+Meal Plan
+├── People Count
+├── Dish 1
+│   ├── Requested Servings
+│   ├── Cuisine
+│   ├── Recipe Preference
+│   ├── Dietary Requirements
+│   └── Other Constraints
+├── Dish 2
+│   ├── Requested Servings
+│   ├── Cuisine
+│   ├── Recipe Preference
+│   ├── Dietary Requirements
+│   └── Other Constraints
+└── Dish N
+```
+
+Each dish is evaluated independently for:
+
+- Serving coverage
+- Pantry availability
+- Required quantities
+- Missing quantities
+- Estimated additional cost
+- Budget compatibility
+- Potential food waste
+
+The system must not assume that every dish has the same serving quantity or cuisine.
 
 ---
 
