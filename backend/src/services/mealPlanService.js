@@ -1,42 +1,120 @@
 import prisma from "../config/database.js";
+import AppError from "../utils/AppError.js";
 
-export const createMealPlan = async ({
-  userId,
-  recipeId,
-  date,
-  mealType,
-  notes,
-}) => {
+const recipeSelect = {
+  id: true,
+  title: true,
+  description: true,
+  prepTime: true,
+  cookTime: true,
+  servings: true,
+};
+
+const mealPlanItemInclude = {
+  recipe: {
+    select: recipeSelect,
+  },
+};
+
+const validateRecipeOwnership = async ({ userId, recipeId }) => {
   const recipe = await prisma.recipe.findFirst({
     where: {
       id: recipeId,
       userId,
     },
+    select: {
+      id: true,
+    },
   });
 
-  if (!recipe) {
-    return null;
+  return recipe;
+};
+
+export const createMealPlan = async ({
+  userId,
+  name,
+  startDate,
+  endDate,
+  peopleCount,
+  budget,
+  dishes,
+}) => {
+  if (new Date(endDate) < new Date(startDate)) {
+    throw new AppError(
+      "End date cannot precede start date",
+      400,
+      "INVALID_MEAL_PLAN_DATE_RANGE"
+    );
   }
 
-  return prisma.mealPlan.create({
-    data: {
+  const recipeIds = [
+    ...new Set(dishes.map((dish) => dish.recipeId)),
+  ];
+
+  const recipes = await prisma.recipe.findMany({
+    where: {
+      id: {
+        in: recipeIds,
+      },
       userId,
-      recipeId,
-      date,
-      mealType,
-      notes,
     },
-    include: {
-      recipe: {
-        select: {
-          id: true,
-          title: true,
-          prepTime: true,
-          cookTime: true,
-          servings: true,
+    select: {
+      id: true,
+    },
+  });
+
+  const validRecipeIds = new Set(
+    recipes.map((recipe) => recipe.id)
+  );
+
+  const invalidRecipe = dishes.find(
+    (dish) => !validRecipeIds.has(dish.recipeId)
+  );
+
+  if (invalidRecipe) {
+    throw new AppError(
+      `Recipe not found: ${invalidRecipe.recipeId}`,
+      404,
+      "RECIPE_NOT_FOUND"
+    );
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const mealPlan = await tx.mealPlan.create({
+      data: {
+        userId,
+        name,
+        startDate: new Date(startDate),
+        endDate: new Date(endDate),
+        peopleCount,
+        budget,
+        items: {
+          create: dishes.map((dish) => ({
+            recipeId: dish.recipeId,
+            plannedDate: dish.plannedDate
+              ? new Date(dish.plannedDate)
+              : new Date(startDate),
+            mealType: dish.mealType ?? "other",
+            requestedServings: dish.requestedServings,
+            cuisine: dish.cuisine,
+            recipePreference: dish.recipePreference,
+            dietaryRequirements: dish.dietaryRequirements,
+            budgetPriority: dish.budgetPriority,
+            otherPreferences: dish.otherPreferences,
+          })),
         },
       },
-    },
+      include: {
+        items: {
+          include: mealPlanItemInclude,
+          orderBy: {
+            plannedDate: "asc",
+          },
+        },
+      },
+    });
+
+    return mealPlan;
   });
 };
 
@@ -44,38 +122,28 @@ export const getMealPlans = async ({
   userId,
   startDate,
   endDate,
-  mealType,
 }) => {
   return prisma.mealPlan.findMany({
     where: {
       userId,
-      ...(mealType !== undefined && {
-        mealType,
-      }),
       ...(startDate !== undefined &&
         endDate !== undefined && {
-          date: {
-            gte: startDate,
+          startDate: {
             lte: endDate,
+          },
+          endDate: {
+            gte: startDate,
           },
         }),
     },
-    orderBy: [
-      {
-        date: "asc",
-      },
-      {
-        mealType: "asc",
-      },
-    ],
+    orderBy: {
+      startDate: "asc",
+    },
     include: {
-      recipe: {
-        select: {
-          id: true,
-          title: true,
-          prepTime: true,
-          cookTime: true,
-          servings: true,
+      items: {
+        include: mealPlanItemInclude,
+        orderBy: {
+          plannedDate: "asc",
         },
       },
     },
@@ -92,15 +160,10 @@ export const getMealPlanById = async ({
       userId,
     },
     include: {
-      recipe: {
-        select: {
-          id: true,
-          title: true,
-          description: true,
-          instructions: true,
-          prepTime: true,
-          cookTime: true,
-          servings: true,
+      items: {
+        include: mealPlanItemInclude,
+        orderBy: {
+          plannedDate: "asc",
         },
       },
     },
@@ -110,10 +173,11 @@ export const getMealPlanById = async ({
 export const updateMealPlan = async ({
   userId,
   mealPlanId,
-  recipeId,
-  date,
-  mealType,
-  notes,
+  name,
+  startDate,
+  endDate,
+  peopleCount,
+  budget,
 }) => {
   const mealPlan = await prisma.mealPlan.findFirst({
     where: {
@@ -126,17 +190,22 @@ export const updateMealPlan = async ({
     return null;
   }
 
-  if (recipeId !== undefined) {
-    const recipe = await prisma.recipe.findFirst({
-      where: {
-        id: recipeId,
-        userId,
-      },
-    });
+  const nextStartDate =
+    startDate !== undefined
+      ? new Date(startDate)
+      : mealPlan.startDate;
 
-    if (!recipe) {
-      return null;
-    }
+  const nextEndDate =
+    endDate !== undefined
+      ? new Date(endDate)
+      : mealPlan.endDate;
+
+  if (nextEndDate < nextStartDate) {
+    throw new AppError(
+      "End date cannot precede start date",
+      400,
+      "INVALID_MEAL_PLAN_DATE_RANGE"
+    );
   }
 
   return prisma.mealPlan.update({
@@ -144,23 +213,183 @@ export const updateMealPlan = async ({
       id: mealPlanId,
     },
     data: {
-      ...(recipeId !== undefined && { recipeId }),
-      ...(date !== undefined && { date }),
-      ...(mealType !== undefined && { mealType }),
-      ...(notes !== undefined && { notes }),
+      ...(name !== undefined && { name }),
+      ...(startDate !== undefined && {
+        startDate: new Date(startDate),
+      }),
+      ...(endDate !== undefined && {
+        endDate: new Date(endDate),
+      }),
+      ...(peopleCount !== undefined && { peopleCount }),
+      ...(budget !== undefined && { budget }),
     },
     include: {
-      recipe: {
-        select: {
-          id: true,
-          title: true,
-          prepTime: true,
-          cookTime: true,
-          servings: true,
+      items: {
+        include: mealPlanItemInclude,
+        orderBy: {
+          plannedDate: "asc",
         },
       },
     },
   });
+};
+
+export const addMealPlanDish = async ({
+  userId,
+  mealPlanId,
+  recipeId,
+  plannedDate,
+  mealType,
+  requestedServings,
+  cuisine,
+  recipePreference,
+  dietaryRequirements,
+  budgetPriority,
+  otherPreferences,
+}) => {
+  const mealPlan = await prisma.mealPlan.findFirst({
+    where: {
+      id: mealPlanId,
+      userId,
+    },
+  });
+
+  if (!mealPlan) {
+    return null;
+  }
+
+  const recipe = await validateRecipeOwnership({
+    userId,
+    recipeId,
+  });
+
+  if (!recipe) {
+    throw new AppError(
+      "Recipe not found",
+      404,
+      "RECIPE_NOT_FOUND"
+    );
+  }
+
+  return prisma.mealPlanItem.create({
+    data: {
+      mealPlanId,
+      recipeId,
+      plannedDate: plannedDate
+        ? new Date(plannedDate)
+        : mealPlan.startDate,
+      mealType: mealType ?? "other",
+      requestedServings,
+      cuisine,
+      recipePreference,
+      dietaryRequirements,
+      budgetPriority,
+      otherPreferences,
+    },
+    include: mealPlanItemInclude,
+  });
+};
+
+export const updateMealPlanDish = async ({
+  userId,
+  mealPlanId,
+  dishId,
+  recipeId,
+  plannedDate,
+  mealType,
+  requestedServings,
+  cuisine,
+  recipePreference,
+  dietaryRequirements,
+  budgetPriority,
+  otherPreferences,
+}) => {
+  const dish = await prisma.mealPlanItem.findFirst({
+    where: {
+      id: dishId,
+      mealPlanId,
+      mealPlan: {
+        userId,
+      },
+    },
+  });
+
+  if (!dish) {
+    return null;
+  }
+
+  if (recipeId !== undefined) {
+    const recipe = await validateRecipeOwnership({
+      userId,
+      recipeId,
+    });
+
+    if (!recipe) {
+      throw new AppError(
+        "Recipe not found",
+        404,
+        "RECIPE_NOT_FOUND"
+      );
+    }
+  }
+
+  return prisma.mealPlanItem.update({
+    where: {
+      id: dishId,
+    },
+    data: {
+      ...(recipeId !== undefined && { recipeId }),
+      ...(plannedDate !== undefined && {
+        plannedDate: new Date(plannedDate),
+      }),
+      ...(mealType !== undefined && { mealType }),
+      ...(requestedServings !== undefined && {
+        requestedServings,
+      }),
+      ...(cuisine !== undefined && { cuisine }),
+      ...(recipePreference !== undefined && {
+        recipePreference,
+      }),
+      ...(dietaryRequirements !== undefined && {
+        dietaryRequirements,
+      }),
+      ...(budgetPriority !== undefined && {
+        budgetPriority,
+      }),
+      ...(otherPreferences !== undefined && {
+        otherPreferences,
+      }),
+    },
+    include: mealPlanItemInclude,
+  });
+};
+
+export const deleteMealPlanDish = async ({
+  userId,
+  mealPlanId,
+  dishId,
+}) => {
+  const dish = await prisma.mealPlanItem.findFirst({
+    where: {
+      id: dishId,
+      mealPlanId,
+      mealPlan: {
+        userId,
+      },
+    },
+  });
+
+  if (!dish) {
+    return null;
+  }
+
+  await prisma.mealPlanItem.delete({
+    where: {
+      id: dishId,
+    },
+  });
+
+  return true;
 };
 
 export const deleteMealPlan = async ({

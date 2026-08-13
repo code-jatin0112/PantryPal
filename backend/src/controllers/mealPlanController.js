@@ -3,6 +3,9 @@ import {
   getMealPlans,
   getMealPlanById,
   updateMealPlan,
+  addMealPlanDish,
+  updateMealPlanDish,
+  deleteMealPlanDish,
   deleteMealPlan,
 } from "../services/mealPlanService.js";
 
@@ -10,21 +13,13 @@ export const createMealPlanController = async (req, res, next) => {
   try {
     const mealPlan = await createMealPlan({
       userId: req.user.id,
-      recipeId: req.body.recipeId,
-      date: new Date(req.body.date),
-      mealType: req.body.mealType,
-      notes: req.body.notes,
+      name: req.body.name,
+      startDate: req.body.startDate,
+      endDate: req.body.endDate,
+      peopleCount: req.body.peopleCount,
+      budget: req.body.budget,
+      dishes: req.body.dishes,
     });
-
-    if (!mealPlan) {
-      return res.status(404).json({
-        success: false,
-        error: {
-          code: "RECIPE_NOT_FOUND",
-          message: "Recipe not found",
-        },
-      });
-    }
 
     return res.status(201).json({
       success: true,
@@ -51,7 +46,6 @@ export const getMealPlansController = async (req, res, next) => {
       userId: req.user.id,
       startDate,
       endDate,
-      mealType: req.query.mealType,
     });
 
     return res.status(200).json({
@@ -98,12 +92,11 @@ export const updateMealPlanController = async (req, res, next) => {
     const mealPlan = await updateMealPlan({
       userId: req.user.id,
       mealPlanId: req.params.mealPlanId,
-      recipeId: req.body.recipeId,
-      date: req.body.date
-        ? new Date(req.body.date)
-        : undefined,
-      mealType: req.body.mealType,
-      notes: req.body.notes,
+      name: req.body.name,
+      startDate: req.body.startDate,
+      endDate: req.body.endDate,
+      peopleCount: req.body.peopleCount,
+      budget: req.body.budget,
     });
 
     if (!mealPlan) {
@@ -111,7 +104,7 @@ export const updateMealPlanController = async (req, res, next) => {
         success: false,
         error: {
           code: "MEAL_PLAN_NOT_FOUND",
-          message: "Meal plan or recipe not found",
+          message: "Meal plan not found",
         },
       });
     }
@@ -122,6 +115,105 @@ export const updateMealPlanController = async (req, res, next) => {
         mealPlan,
       },
     });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const addMealPlanDishController = async (req, res, next) => {
+  try {
+    const dish = await addMealPlanDish({
+      userId: req.user.id,
+      mealPlanId: req.params.mealPlanId,
+      recipeId: req.body.recipeId,
+      plannedDate: req.body.plannedDate,
+      mealType: req.body.mealType,
+      requestedServings: req.body.requestedServings,
+      cuisine: req.body.cuisine,
+      recipePreference: req.body.recipePreference,
+      dietaryRequirements: req.body.dietaryRequirements,
+      budgetPriority: req.body.budgetPriority,
+      otherPreferences: req.body.otherPreferences,
+    });
+
+    if (!dish) {
+      return res.status(404).json({
+        success: false,
+        error: {
+          code: "MEAL_PLAN_NOT_FOUND",
+          message: "Meal plan not found",
+        },
+      });
+    }
+
+    return res.status(201).json({
+      success: true,
+      data: {
+        dish,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const updateMealPlanDishController = async (req, res, next) => {
+  try {
+    const dish = await updateMealPlanDish({
+      userId: req.user.id,
+      mealPlanId: req.params.mealPlanId,
+      dishId: req.params.dishId,
+      recipeId: req.body.recipeId,
+      plannedDate: req.body.plannedDate,
+      mealType: req.body.mealType,
+      requestedServings: req.body.requestedServings,
+      cuisine: req.body.cuisine,
+      recipePreference: req.body.recipePreference,
+      dietaryRequirements: req.body.dietaryRequirements,
+      budgetPriority: req.body.budgetPriority,
+      otherPreferences: req.body.otherPreferences,
+    });
+
+    if (!dish) {
+      return res.status(404).json({
+        success: false,
+        error: {
+          code: "MEAL_PLAN_DISH_NOT_FOUND",
+          message: "Meal plan dish not found",
+        },
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        dish,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const deleteMealPlanDishController = async (req, res, next) => {
+  try {
+    const deleted = await deleteMealPlanDish({
+      userId: req.user.id,
+      mealPlanId: req.params.mealPlanId,
+      dishId: req.params.dishId,
+    });
+
+    if (!deleted) {
+      return res.status(404).json({
+        success: false,
+        error: {
+          code: "MEAL_PLAN_DISH_NOT_FOUND",
+          message: "Meal plan dish not found",
+        },
+      });
+    }
+
+    return res.status(204).send();
   } catch (error) {
     next(error);
   }

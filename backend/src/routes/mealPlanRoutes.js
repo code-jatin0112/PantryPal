@@ -7,6 +7,9 @@ import {
   getMealPlansController,
   getMealPlanByIdController,
   updateMealPlanController,
+  addMealPlanDishController,
+  updateMealPlanDishController,
+  deleteMealPlanDishController,
   deleteMealPlanController,
 } from "../controllers/mealPlanController.js";
 
@@ -15,6 +18,9 @@ import {
   createMealPlanValidation,
   updateMealPlanValidation,
   mealPlanQueryValidation,
+  mealPlanDishParamsValidation,
+  addMealPlanDishValidation,
+  updateMealPlanDishValidation,
 } from "../validators/mealPlanValidator.js";
 
 import { handleValidationErrors } from "../validators/authValidator.js";
@@ -49,6 +55,28 @@ router.patch(
   updateMealPlanValidation,
   handleValidationErrors,
   updateMealPlanController
+);
+
+router.post(
+  "/:mealPlanId/dishes",
+  addMealPlanDishValidation,
+  handleValidationErrors,
+  addMealPlanDishController
+);
+
+router.patch(
+  "/:mealPlanId/dishes/:dishId",
+  mealPlanDishParamsValidation,
+  updateMealPlanDishValidation,
+  handleValidationErrors,
+  updateMealPlanDishController
+);
+
+router.delete(
+  "/:mealPlanId/dishes/:dishId",
+  mealPlanDishParamsValidation,
+  handleValidationErrors,
+  deleteMealPlanDishController
 );
 
 router.delete(
