@@ -11,6 +11,7 @@ import {
   updateMealPlanDishController,
   deleteMealPlanDishController,
   deleteMealPlanController,
+  evaluateMealPlanController,
 } from "../controllers/mealPlanController.js";
 
 import {
@@ -21,6 +22,7 @@ import {
   mealPlanDishParamsValidation,
   addMealPlanDishValidation,
   updateMealPlanDishValidation,
+  evaluateMealPlanValidation,
 } from "../validators/mealPlanValidator.js";
 
 import { handleValidationErrors } from "../validators/authValidator.js";
@@ -41,6 +43,13 @@ router.get(
   mealPlanQueryValidation,
   handleValidationErrors,
   getMealPlansController
+);
+
+router.post(
+  "/:mealPlanId/evaluate",
+  evaluateMealPlanValidation,
+  handleValidationErrors,
+  evaluateMealPlanController
 );
 
 router.get(

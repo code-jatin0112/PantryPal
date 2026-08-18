@@ -305,3 +305,11 @@ export const mealPlanQueryValidation = [
       "End date must be a valid ISO 8601 date"
     ),
 ];
+
+export const evaluateMealPlanValidation = [
+  ...mealPlanParamsValidation,
+
+  body("pantryId")
+    .isUUID()
+    .withMessage("Pantry ID must be a valid UUID"),
+];

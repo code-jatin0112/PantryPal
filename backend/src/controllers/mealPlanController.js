@@ -7,6 +7,7 @@ import {
   updateMealPlanDish,
   deleteMealPlanDish,
   deleteMealPlan,
+  evaluateMealPlan,
 } from "../services/mealPlanService.js";
 
 export const createMealPlanController = async (req, res, next) => {
@@ -81,6 +82,27 @@ export const getMealPlanByIdController = async (req, res, next) => {
       data: {
         mealPlan,
       },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const evaluateMealPlanController = async (
+  req,
+  res,
+  next
+) => {
+  try {
+    const result = await evaluateMealPlan({
+      userId: req.user.id,
+      mealPlanId: req.params.mealPlanId,
+      pantryId: req.body.pantryId,
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: result,
     });
   } catch (error) {
     next(error);
