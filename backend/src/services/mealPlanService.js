@@ -1,6 +1,10 @@
 import prisma from "../config/database.js";
 import AppError from "../utils/AppError.js";
 
+import {
+  generateMealPlanAnalysis,
+} from "./mealPlanningEngine/mealPlanningEngine.js";
+
 const recipeSelect = {
   id: true,
   title: true,
@@ -414,4 +418,134 @@ export const deleteMealPlan = async ({
   });
 
   return true;
+};
+
+const getNutritionPerServing = ({
+  nutrition,
+  servings,
+}) => {
+  if (!nutrition) {
+    return null;
+  }
+
+  return {
+    calories: nutrition.calories / servings,
+    protein: nutrition.protein / servings,
+    carbs: nutrition.carbohydrates / servings,
+    fat: nutrition.fat / servings,
+    fiber: nutrition.fiber / servings,
+  };
+};
+
+export const evaluateMealPlan = async ({
+  userId,
+  mealPlanId,
+  pantryId,
+}) => {
+  const mealPlan = await prisma.mealPlan.findFirst({
+    where: {
+      id: mealPlanId,
+      userId,
+    },
+    include: {
+      items: {
+        orderBy: {
+          plannedDate: "asc",
+        },
+        include: {
+          recipe: {
+            include: {
+              ingredients: true,
+              nutrition: true,
+            },
+          },
+        },
+      },
+    },
+  });
+
+  if (!mealPlan) {
+    throw new AppError(
+      "Meal plan not found",
+      404,
+      "MEAL_PLAN_NOT_FOUND"
+    );
+  }
+
+  const pantry = await prisma.pantry.findFirst({
+    where: {
+      id: pantryId,
+      userId,
+    },
+    include: {
+      items: {
+        orderBy: {
+          name: "asc",
+        },
+      },
+    },
+  });
+
+  if (!pantry) {
+    throw new AppError(
+      "Pantry not found",
+      404,
+      "PANTRY_NOT_FOUND"
+    );
+  }
+
+  if (mealPlan.items.length === 0) {
+    throw new AppError(
+      "Meal plan has no dishes",
+      400,
+      "MEAL_PLAN_HAS_NO_DISHES"
+    );
+  }
+
+  const dishes = mealPlan.items.map((item) => {
+    if (!item.recipe.servings) {
+      throw new AppError(
+        `Recipe servings are not defined for ${item.recipe.title}`,
+        400,
+        "RECIPE_SERVINGS_NOT_DEFINED"
+      );
+    }
+
+    return {
+      dishId: item.id,
+      recipeId: item.recipe.id,
+      baseServings: item.recipe.servings,
+      requestedServings: item.requestedServings,
+      ingredients: item.recipe.ingredients,
+      nutritionPerServing: getNutritionPerServing({
+        nutrition: item.recipe.nutrition,
+        servings: item.recipe.servings,
+      }),
+    };
+  });
+
+  const analysis = generateMealPlanAnalysis({
+    dishes,
+    pantryItems: pantry.items,
+    budget: mealPlan.budget ?? undefined,
+    peopleCount: mealPlan.peopleCount,
+  });
+
+    return {
+    mealPlan: {
+      id: mealPlan.id,
+      name: mealPlan.name,
+      peopleCount: mealPlan.peopleCount,
+      budget: mealPlan.budget,
+    },
+    pantry: {
+      id: pantry.id,
+      name: pantry.name,
+      ...analysis.pantry,
+    },
+    dishes: analysis.dishes,
+    grocery: analysis.grocery,
+    budget: analysis.budget,
+    nutrition: analysis.nutrition,
+  };
 };
