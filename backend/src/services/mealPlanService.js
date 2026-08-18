@@ -549,3 +549,48 @@ export const evaluateMealPlan = async ({
     nutrition: analysis.nutrition,
   };
 };
+
+const getGroceryRequirementKey = ({
+  name,
+  unit,
+}) =>
+  `${name.trim().toLowerCase()}::${unit
+    .trim()
+    .toLowerCase()}`;
+
+export const getMealPlanGroceryRequirements = async ({
+  userId,
+  mealPlanId,
+  pantryId,
+}) => {
+  const evaluation = await evaluateMealPlan({
+    userId,
+    mealPlanId,
+    pantryId,
+  });
+
+  const sourceDishIdsByRequirement = new Map();
+
+  for (const dish of evaluation.dishes) {
+    for (const ingredient of dish.missingIngredients) {
+      const key = getGroceryRequirementKey(ingredient);
+
+      if (!sourceDishIdsByRequirement.has(key)) {
+        sourceDishIdsByRequirement.set(key, new Set());
+      }
+
+      sourceDishIdsByRequirement.get(key).add(dish.dishId);
+    }
+  }
+
+  return {
+    items: evaluation.grocery.items.map((item) => ({
+      ...item,
+      sourceDishIds: Array.from(
+        sourceDishIdsByRequirement.get(
+          getGroceryRequirementKey(item)
+        ) ?? []
+      ),
+    })),
+  };
+};
