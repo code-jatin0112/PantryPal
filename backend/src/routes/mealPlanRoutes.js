@@ -12,6 +12,7 @@ import {
   deleteMealPlanDishController,
   deleteMealPlanController,
   evaluateMealPlanController,
+  getMealPlanGroceryRequirementsController,
 } from "../controllers/mealPlanController.js";
 
 import {
@@ -50,6 +51,13 @@ router.post(
   evaluateMealPlanValidation,
   handleValidationErrors,
   evaluateMealPlanController
+);
+
+router.post(
+  "/:mealPlanId/grocery-requirements",
+  evaluateMealPlanValidation,
+  handleValidationErrors,
+  getMealPlanGroceryRequirementsController
 );
 
 router.get(
