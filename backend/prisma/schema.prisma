@@ -27,6 +27,24 @@ model User {
   favorites       RecipeFavorite[]
   cookingSessions CookingSession[]
   mealPlans       MealPlan[]
+  preference      UserPreference?
+}
+
+model UserPreference {
+  id                  String   @id @default(uuid())
+  userId              String   @unique
+  dietaryPreferences String[] @default([])
+  allergies           String[] @default([])
+  dislikedIngredients String[] @default([])
+  defaultServings     Int      @default(2)
+  maxCookingMinutes   Int?
+  defaultBudget       Float?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 model Pantry {
