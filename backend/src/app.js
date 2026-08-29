@@ -1,10 +1,15 @@
 import express from "express";
-import cors from "cors";
+import {
+  helmetConfig,
+  getCorsOptions,
+  getRateLimiter,
+} from "./config/security.js";
+import { notFoundHandler } from "./middleware/notFoundHandler.js";
+import { errorHandler } from "./middleware/errorHandler.js";
 
 import authRoutes from "./routes/authRoutes.js";
 import pantryRoutes from "./routes/pantryRoutes.js";
 import pantryItemRoutes from "./routes/pantryItemRoutes.js";
-import { errorHandler } from "./middleware/errorHandler.js";
 import recipeRoutes from "./routes/recipeRoutes.js";
 import recipeIngredientRoutes from "./routes/recipeIngredientRoutes.js";
 import recipePantryMatchingRoutes from "./routes/recipePantryMatchingRoutes.js";
@@ -23,9 +28,20 @@ import aiChatRoutes from "./routes/aiChatRoutes.js";
 
 const app = express();
 
-app.use(cors());
-app.use(express.json());
+if (
+  process.env.TRUST_PROXY === "true" ||
+  process.env.NODE_ENV === "production"
+) {
+  app.set("trust proxy", 1);
+}
 
+// Security Middleware Ordering
+app.use(helmetConfig);
+app.use(getCorsOptions());
+app.use(getRateLimiter());
+app.use(express.json({ limit: "1mb" }));
+
+// Health Check
 app.get("/api/v1/health", (req, res) => {
   res.status(200).json({
     success: true,
@@ -35,6 +51,7 @@ app.get("/api/v1/health", (req, res) => {
   });
 });
 
+// Application Routes
 app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/preferences", userPreferenceRoutes);
 app.use("/api/v1/pantries", pantryRoutes);
@@ -66,6 +83,8 @@ app.use(
   recipeServingScalingRoutes
 );
 
+// 404 & Global Error Handling
+app.use(notFoundHandler);
 app.use(errorHandler);
 
 export default app;
