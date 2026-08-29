@@ -18,6 +18,7 @@ import cookingSessionRoutes from "./routes/cookingSessionRoutes.js";
 import aiRecipeRoutes from "./routes/aiRecipeRoutes.js";
 import aiRecommendationRoutes from "./routes/aiRecommendationRoutes.js";
 import recipeServingScalingRoutes from "./routes/recipeServingScalingRoutes.js";
+import userPreferenceRoutes from "./routes/userPreferenceRoutes.js";
 
 const app = express();
 
@@ -34,6 +35,7 @@ app.get("/api/v1/health", (req, res) => {
 });
 
 app.use("/api/v1/auth", authRoutes);
+app.use("/api/v1/preferences", userPreferenceRoutes);
 app.use("/api/v1/pantries", pantryRoutes);
 app.use("/api/v1/pantries/:pantryId/items", pantryItemRoutes);
 app.use("/api/v1/recipes", recipeRoutes);
