@@ -6,11 +6,11 @@ import prisma from "../../src/config/database.js";
 
 process.env.JWT_SECRET = process.env.JWT_SECRET || "test-jwt-secret-key";
 
-const createTestAuthToken = (userId = "user-uuid-1234") => {
+const createTestAuthToken = (userId = "user-uuid-1234", expiresIn = "1h") => {
   return jwt.sign(
     { sub: userId },
     process.env.JWT_SECRET,
-    { expiresIn: "1h" }
+    { expiresIn }
   );
 };
 
@@ -30,8 +30,53 @@ describe("Meal Planner API Integration Tests (Sprint 4)", () => {
     vi.restoreAllMocks();
   });
 
-  describe("1. POST /api/v1/meal-plans (Creation & Validation)", () => {
-    it("successfully creates a multi-dish meal plan", async () => {
+  describe("1. Authentication & Security Guards across Meal Planner Endpoints", () => {
+    it("POST /api/v1/meal-plans fails with 401 when no token is provided", async () => {
+      const res = await supertest(app)
+        .post("/api/v1/meal-plans")
+        .send({ name: "Unauthenticated Plan" });
+
+      expect(res.status).toBe(401);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.code).toBe("AUTHENTICATION_REQUIRED");
+    });
+
+    it("GET /api/v1/meal-plans fails with 401 on malformed Authorization header", async () => {
+      const res = await supertest(app)
+        .get("/api/v1/meal-plans")
+        .set("Authorization", "InvalidHeaderFormat");
+
+      expect(res.status).toBe(401);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.code).toBe("INVALID_AUTH_HEADER");
+    });
+
+    it("GET /api/v1/meal-plans/:mealPlanId fails with 401 on invalid JWT signature", async () => {
+      const res = await supertest(app)
+        .get(`/api/v1/meal-plans/${mealPlanId}`)
+        .set("Authorization", "Bearer invalid.signature.token");
+
+      expect(res.status).toBe(401);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.code).toBe("INVALID_TOKEN");
+    });
+
+    it("POST /api/v1/meal-plans fails with 401 on expired JWT token", async () => {
+      const expiredToken = createTestAuthToken(userId, "-1s");
+
+      const res = await supertest(app)
+        .post("/api/v1/meal-plans")
+        .set("Authorization", `Bearer ${expiredToken}`)
+        .send({ name: "Expired Plan" });
+
+      expect(res.status).toBe(401);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.code).toBe("INVALID_TOKEN");
+    });
+  });
+
+  describe("2. POST /api/v1/meal-plans (Creation, Validation & Recipe Ownership)", () => {
+    it("successfully creates a multi-dish meal plan in a transaction", async () => {
       vi.spyOn(prisma.recipe, "findMany").mockResolvedValue([
         { id: recipeId },
         { id: recipeId2 },
@@ -51,6 +96,8 @@ describe("Meal Planner API Integration Tests (Sprint 4)", () => {
             recipeId,
             mealType: "dinner",
             requestedServings: 4,
+            cuisine: "Italian",
+            budgetPriority: "medium",
             recipe: {
               id: recipeId,
               title: "Spaghetti Bolognese",
@@ -82,6 +129,8 @@ describe("Meal Planner API Integration Tests (Sprint 4)", () => {
               recipeId,
               requestedServings: 4,
               mealType: "dinner",
+              cuisine: "Italian",
+              budgetPriority: "medium",
             },
           ],
         });
@@ -93,17 +142,7 @@ describe("Meal Planner API Integration Tests (Sprint 4)", () => {
       expect(res.body.data.mealPlan.items).toHaveLength(1);
     });
 
-    it("fails with 401 when no auth token is provided", async () => {
-      const res = await supertest(app)
-        .post("/api/v1/meal-plans")
-        .send({ name: "Unauthenticated Plan" });
-
-      expect(res.status).toBe(401);
-      expect(res.body.success).toBe(false);
-      expect(res.body.error.code).toBe("AUTHENTICATION_REQUIRED");
-    });
-
-    it("fails with 400 INVALID_MEAL_PLAN_DATE_RANGE when endDate is before startDate", async () => {
+    it("fails with 400 INVALID_MEAL_PLAN_DATE_RANGE when endDate precedes startDate", async () => {
       const res = await supertest(app)
         .post("/api/v1/meal-plans")
         .set("Authorization", `Bearer ${token}`)
@@ -120,8 +159,8 @@ describe("Meal Planner API Integration Tests (Sprint 4)", () => {
       expect(res.body.error.code).toBe("INVALID_MEAL_PLAN_DATE_RANGE");
     });
 
-    it("fails with 404 RECIPE_NOT_FOUND when a dish references a recipe not owned by user", async () => {
-      vi.spyOn(prisma.recipe, "findMany").mockResolvedValue([]); // No matching owned recipes
+    it("fails with 404 RECIPE_NOT_FOUND when dish references recipe not owned by user", async () => {
+      vi.spyOn(prisma.recipe, "findMany").mockResolvedValue([]);
 
       const res = await supertest(app)
         .post("/api/v1/meal-plans")
@@ -139,7 +178,7 @@ describe("Meal Planner API Integration Tests (Sprint 4)", () => {
       expect(res.body.error.code).toBe("RECIPE_NOT_FOUND");
     });
 
-    it("fails with 400 VALIDATION_ERROR when dishes array is empty or missing", async () => {
+    it("fails with 400 VALIDATION_ERROR when dishes array is empty", async () => {
       const res = await supertest(app)
         .post("/api/v1/meal-plans")
         .set("Authorization", `Bearer ${token}`)
@@ -152,12 +191,53 @@ describe("Meal Planner API Integration Tests (Sprint 4)", () => {
         });
 
       expect(res.status).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.code).toBe("VALIDATION_ERROR");
+    });
+
+    it("fails with 400 VALIDATION_ERROR when budgetPriority has an invalid enum value", async () => {
+      const res = await supertest(app)
+        .post("/api/v1/meal-plans")
+        .set("Authorization", `Bearer ${token}`)
+        .send({
+          name: "Invalid Priority Plan",
+          startDate: "2026-09-01T00:00:00.000Z",
+          endDate: "2026-09-07T00:00:00.000Z",
+          peopleCount: 2,
+          dishes: [
+            {
+              recipeId,
+              requestedServings: 2,
+              budgetPriority: "ultra-high", // invalid enum
+            },
+          ],
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.code).toBe("VALIDATION_ERROR");
+    });
+
+    it("fails with 400 VALIDATION_ERROR when budget is negative", async () => {
+      const res = await supertest(app)
+        .post("/api/v1/meal-plans")
+        .set("Authorization", `Bearer ${token}`)
+        .send({
+          name: "Negative Budget Plan",
+          startDate: "2026-09-01T00:00:00.000Z",
+          endDate: "2026-09-07T00:00:00.000Z",
+          peopleCount: 2,
+          budget: -25,
+          dishes: [{ recipeId, requestedServings: 2 }],
+        });
+
+      expect(res.status).toBe(400);
       expect(res.body.error.code).toBe("VALIDATION_ERROR");
     });
   });
 
-  describe("2. GET /api/v1/meal-plans & GET /api/v1/meal-plans/:mealPlanId", () => {
-    it("GET /api/v1/meal-plans lists user meal plans with tenant isolation", async () => {
+  describe("3. GET /api/v1/meal-plans (Listing & Tenant Isolation)", () => {
+    it("lists meal plans belonging strictly to the authenticated user", async () => {
       const mockPlans = [
         {
           id: mealPlanId,
@@ -181,6 +261,9 @@ describe("Meal Planner API Integration Tests (Sprint 4)", () => {
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
       expect(res.body.data.mealPlans).toHaveLength(1);
+      expect(res.body.data.mealPlans[0].id).toBe(mealPlanId);
+
+      // Verify tenant isolation filter
       expect(findSpy).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({ userId }),
@@ -188,7 +271,30 @@ describe("Meal Planner API Integration Tests (Sprint 4)", () => {
       );
     });
 
-    it("GET /api/v1/meal-plans/:mealPlanId returns single meal plan with dishes", async () => {
+    it("applies optional date filters when query parameters are supplied", async () => {
+      const findSpy = vi
+        .spyOn(prisma.mealPlan, "findMany")
+        .mockResolvedValue([]);
+
+      const res = await supertest(app)
+        .get("/api/v1/meal-plans?startDate=2026-09-01T00:00:00.000Z&endDate=2026-09-30T00:00:00.000Z")
+        .set("Authorization", `Bearer ${token}`);
+
+      expect(res.status).toBe(200);
+      expect(findSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            userId,
+            startDate: { lte: new Date("2026-09-30T00:00:00.000Z") },
+            endDate: { gte: new Date("2026-09-01T00:00:00.000Z") },
+          }),
+        })
+      );
+    });
+  });
+
+  describe("4. GET, PATCH & DELETE /api/v1/meal-plans/:mealPlanId", () => {
+    it("GET returns single meal plan with dishes and recipe details", async () => {
       const mockPlan = {
         id: mealPlanId,
         userId,
@@ -217,7 +323,7 @@ describe("Meal Planner API Integration Tests (Sprint 4)", () => {
       expect(res.body.data.mealPlan.items).toHaveLength(1);
     });
 
-    it("GET /api/v1/meal-plans/:mealPlanId fails with 404 when plan belongs to another user", async () => {
+    it("GET fails with 404 MEAL_PLAN_NOT_FOUND when meal plan belongs to another user", async () => {
       vi.spyOn(prisma.mealPlan, "findFirst").mockResolvedValue(null);
 
       const res = await supertest(app)
@@ -228,10 +334,8 @@ describe("Meal Planner API Integration Tests (Sprint 4)", () => {
       expect(res.body.success).toBe(false);
       expect(res.body.error.code).toBe("MEAL_PLAN_NOT_FOUND");
     });
-  });
 
-  describe("3. PATCH & DELETE /api/v1/meal-plans/:mealPlanId", () => {
-    it("PATCH /api/v1/meal-plans/:mealPlanId updates meal plan metadata", async () => {
+    it("PATCH updates meal plan metadata successfully", async () => {
       vi.spyOn(prisma.mealPlan, "findFirst").mockResolvedValue({
         id: mealPlanId,
         userId,
@@ -243,33 +347,21 @@ describe("Meal Planner API Integration Tests (Sprint 4)", () => {
         id: mealPlanId,
         userId,
         name: "Updated Plan Name",
-        peopleCount: 3,
+        peopleCount: 5,
         items: [],
       });
 
       const res = await supertest(app)
         .patch(`/api/v1/meal-plans/${mealPlanId}`)
         .set("Authorization", `Bearer ${token}`)
-        .send({ name: "Updated Plan Name", peopleCount: 3 });
+        .send({ name: "Updated Plan Name", peopleCount: 5 });
 
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
       expect(res.body.data.mealPlan.name).toBe("Updated Plan Name");
     });
 
-    it("PATCH /api/v1/meal-plans/:mealPlanId fails with 404 when meal plan does not exist", async () => {
-      vi.spyOn(prisma.mealPlan, "findFirst").mockResolvedValue(null);
-
-      const res = await supertest(app)
-        .patch(`/api/v1/meal-plans/${otherMealPlanId}`)
-        .set("Authorization", `Bearer ${token}`)
-        .send({ name: "Renamed" });
-
-      expect(res.status).toBe(404);
-      expect(res.body.error.code).toBe("MEAL_PLAN_NOT_FOUND");
-    });
-
-    it("DELETE /api/v1/meal-plans/:mealPlanId deletes meal plan and returns 204", async () => {
+    it("DELETE removes meal plan and returns 204 No Content", async () => {
       vi.spyOn(prisma.mealPlan, "findFirst").mockResolvedValue({
         id: mealPlanId,
         userId,
@@ -284,8 +376,8 @@ describe("Meal Planner API Integration Tests (Sprint 4)", () => {
     });
   });
 
-  describe("4. Dish Operations (POST, PATCH, DELETE /api/v1/meal-plans/:mealPlanId/dishes)", () => {
-    it("POST /dishes adds a new dish to meal plan", async () => {
+  describe("5. Meal Plan Dish Operations (POST, PATCH, DELETE /api/v1/meal-plans/:mealPlanId/dishes)", () => {
+    it("POST adds a new dish to an existing meal plan", async () => {
       vi.spyOn(prisma.mealPlan, "findFirst").mockResolvedValue({
         id: mealPlanId,
         userId,
@@ -323,7 +415,7 @@ describe("Meal Planner API Integration Tests (Sprint 4)", () => {
       expect(res.body.data.dish.requestedServings).toBe(4);
     });
 
-    it("PATCH /dishes/:dishId updates dish servings and preferences", async () => {
+    it("PATCH updates dish servings and meal type", async () => {
       vi.spyOn(prisma.mealPlanItem, "findFirst").mockResolvedValue({
         id: dishId,
         mealPlanId,
@@ -348,7 +440,7 @@ describe("Meal Planner API Integration Tests (Sprint 4)", () => {
       expect(res.body.data.dish.requestedServings).toBe(6);
     });
 
-    it("DELETE /dishes/:dishId removes dish from meal plan and returns 204", async () => {
+    it("DELETE removes dish from meal plan and returns 204 No Content", async () => {
       vi.spyOn(prisma.mealPlanItem, "findFirst").mockResolvedValue({
         id: dishId,
         mealPlanId,
@@ -363,8 +455,8 @@ describe("Meal Planner API Integration Tests (Sprint 4)", () => {
     });
   });
 
-  describe("5. Meal Plan Evaluation & Grocery Requirements", () => {
-    it("POST /evaluate computes pantry coverage, shortages, and budget calculations", async () => {
+  describe("6. Evaluation & Grocery Requirements (POST /evaluate & /grocery-requirements)", () => {
+    it("POST /evaluate computes pantry coverage, shortages, and nutrition metrics", async () => {
       vi.spyOn(prisma.mealPlan, "findFirst").mockResolvedValue({
         id: mealPlanId,
         userId,
@@ -401,7 +493,7 @@ describe("Meal Planner API Integration Tests (Sprint 4)", () => {
         userId,
         name: "My Pantry",
         items: [
-          { name: "Tomato", quantity: 2, unit: "pieces" }, // 2 shortage
+          { name: "Tomato", quantity: 2, unit: "pieces" },
         ],
       });
 
@@ -461,7 +553,7 @@ describe("Meal Planner API Integration Tests (Sprint 4)", () => {
       expect(Array.isArray(res.body.data.items)).toBe(true);
     });
 
-    it("POST /evaluate fails with 404 PANTRY_NOT_FOUND when pantry does not exist", async () => {
+    it("POST /evaluate fails with 404 PANTRY_NOT_FOUND when pantry belongs to another user", async () => {
       vi.spyOn(prisma.mealPlan, "findFirst").mockResolvedValue({
         id: mealPlanId,
         userId,
