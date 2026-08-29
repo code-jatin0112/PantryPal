@@ -28,3 +28,4 @@ export const chatWithKitchenAssistantValidation = [
     .isLength({ max: 2000 })
     .withMessage("Content must not exceed 2000 characters"),
 ];
+
