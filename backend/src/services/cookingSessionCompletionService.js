@@ -1,5 +1,9 @@
 import prisma from "../config/database.js";
 import AppError from "../utils/AppError.js";
+import {
+  normalizeIngredientName,
+  convertUnitQuantity,
+} from "../utils/ingredientMatcher.js";
 
 export const completeCookingSession = async ({
   userId,
@@ -59,6 +63,10 @@ export const completeCookingSession = async ({
     );
   }
 
+  const targetServings = session.servings || 1;
+  const baseServings = session.recipe.servings || 1;
+  const scalingMultiplier = targetServings / baseServings;
+
   return prisma.$transaction(async (tx) => {
     const pantryItems = await tx.pantryItem.findMany({
       where: {
@@ -68,25 +76,17 @@ export const completeCookingSession = async ({
 
     const normalizedPantryItems = pantryItems.map((item) => ({
       ...item,
-      normalizedName: item.name.trim().toLowerCase(),
-      normalizedUnit: item.unit.trim().toLowerCase(),
+      normalizedName: normalizeIngredientName(item.name),
     }));
 
     const deductions = [];
 
     for (const ingredient of session.recipe.ingredients) {
-      const normalizedName = ingredient.name
-        .trim()
-        .toLowerCase();
-
-      const normalizedUnit = ingredient.unit
-        .trim()
-        .toLowerCase();
+      const normalizedName = normalizeIngredientName(ingredient.name);
+      const scaledRequiredQuantity = ingredient.quantity * scalingMultiplier;
 
       const pantryItem = normalizedPantryItems.find(
-        (item) =>
-          item.normalizedName === normalizedName &&
-          item.normalizedUnit === normalizedUnit
+        (item) => item.normalizedName === normalizedName
       );
 
       if (!pantryItem) {
@@ -97,17 +97,37 @@ export const completeCookingSession = async ({
         );
       }
 
-      if (pantryItem.quantity < ingredient.quantity) {
+      const deductionInPantryUnit = convertUnitQuantity(
+        scaledRequiredQuantity,
+        ingredient.unit,
+        pantryItem.unit
+      );
+
+      if (deductionInPantryUnit === null) {
         throw new AppError(
-          `Insufficient stock for ingredient: ${ingredient.name}`,
+          `Incompatible unit for ingredient: ${ingredient.name} (${ingredient.unit} cannot be converted to ${pantryItem.unit})`,
+          400,
+          "INCOMPATIBLE_UNIT"
+        );
+      }
+
+      if (pantryItem.quantity < deductionInPantryUnit) {
+        throw new AppError(
+          `Insufficient stock for ingredient: ${ingredient.name}. Required: ${deductionInPantryUnit} ${pantryItem.unit}, Available: ${pantryItem.quantity} ${pantryItem.unit}`,
           400,
           "INSUFFICIENT_STOCK"
         );
       }
 
+      // Deduct locally in case multiple recipe lines match same pantry item
+      pantryItem.quantity -= deductionInPantryUnit;
+
       deductions.push({
         itemId: pantryItem.id,
-        quantity: ingredient.quantity,
+        quantity: deductionInPantryUnit,
+        scaledRequiredQuantity,
+        originalUnit: ingredient.unit,
+        name: ingredient.name,
       });
     }
 
@@ -129,7 +149,7 @@ export const completeCookingSession = async ({
 
       if (result.count === 0) {
         throw new AppError(
-          "Insufficient stock",
+          `Insufficient stock for ingredient: ${deduction.name}`,
           400,
           "INSUFFICIENT_STOCK"
         );
@@ -150,9 +170,7 @@ export const completeCookingSession = async ({
     const updatedItems = await tx.pantryItem.findMany({
       where: {
         id: {
-          in: deductions.map(
-            (deduction) => deduction.itemId
-          ),
+          in: deductions.map((deduction) => deduction.itemId),
         },
         pantryId,
       },
@@ -163,15 +181,16 @@ export const completeCookingSession = async ({
 
     return {
       session: completedSession,
-      recipeId: session.recipeId,
       pantryId,
-      consumed: session.recipe.ingredients.map(
-        (ingredient) => ({
-          name: ingredient.name,
-          quantity: ingredient.quantity,
-          unit: ingredient.unit,
-        })
-      ),
+      servings: targetServings,
+      scalingMultiplier,
+      consumed: session.recipe.ingredients.map((ingredient) => ({
+        name: ingredient.name,
+        quantity: ingredient.quantity * scalingMultiplier,
+        unit: ingredient.unit,
+        baseQuantity: ingredient.quantity,
+        baseUnit: ingredient.unit,
+      })),
       items: updatedItems,
     };
   });

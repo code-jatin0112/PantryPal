@@ -12,6 +12,7 @@ export const getRecipePantryAvailabilityController = async (
       userId: req.user.id,
       recipeId: req.params.recipeId,
       pantryId: req.params.pantryId,
+      servings: req.query.servings,
     });
 
     if (!availability) {

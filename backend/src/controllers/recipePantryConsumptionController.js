@@ -8,6 +8,7 @@ export const consumeRecipe = async (req, res, next) => {
       userId: req.user.id,
       recipeId: req.params.recipeId,
       pantryId: req.body.pantryId,
+      servings: req.body.servings,
     });
 
     return res.status(200).json({
