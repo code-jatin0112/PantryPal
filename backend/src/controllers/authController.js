@@ -1,9 +1,7 @@
-import prisma from "../config/database.js";
-import AppError from "../utils/AppError.js";
-
 import {
   registerUser,
   loginUser,
+  getCurrentUser as getCurrentUserService,
 } from "../services/authService.js";
 
 export const register = async (req, res, next) => {
@@ -34,32 +32,13 @@ export const login = async (req, res, next) => {
 
 export const getCurrentUser = async (req, res, next) => {
   try {
-    const user = await prisma.user.findUnique({
-      where: {
-        id: req.user.id,
-      },
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        isActive: true,
-        createdAt: true,
-      },
+    const result = await getCurrentUserService({
+      userId: req.user.id,
     });
-
-    if (!user || !user.isActive) {
-      throw new AppError(
-        "User account is not available",
-        401,
-        "USER_NOT_AVAILABLE"
-      );
-    }
 
     return res.status(200).json({
       success: true,
-      data: {
-        user,
-      },
+      data: result,
     });
   } catch (error) {
     next(error);

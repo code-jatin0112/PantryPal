@@ -10,11 +10,11 @@ export const registerUser = async ({ name, email, password }) => {
 
   if (existingUser) {
     throw new AppError(
-        "User with this email already exists",
-        409,
-        "EMAIL_ALREADY_EXISTS"
+      "User with this email already exists",
+      409,
+      "EMAIL_ALREADY_EXISTS"
     );
- }
+  }
 
   const hashedPassword = await hashPassword(password);
 
@@ -45,19 +45,19 @@ export const loginUser = async ({ email, password }) => {
 
   if (!user || !user.isActive) {
     throw new AppError(
-        "Invalid email or password",
-        401,
-        "INVALID_CREDENTIALS"
+      "Invalid email or password",
+      401,
+      "INVALID_CREDENTIALS"
     );
- }
+  }
 
   const passwordMatches = await comparePassword(password, user.password);
 
   if (!passwordMatches) {
     throw new AppError(
-        "Invalid email or password",
-        401,
-        "INVALID_CREDENTIALS"
+      "Invalid email or password",
+      401,
+      "INVALID_CREDENTIALS"
     );
   }
 
@@ -70,5 +70,32 @@ export const loginUser = async ({ email, password }) => {
       email: user.email,
     },
     accessToken,
+  };
+};
+
+export const getCurrentUser = async ({ userId }) => {
+  const user = await prisma.user.findUnique({
+    where: {
+      id: userId,
+    },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      isActive: true,
+      createdAt: true,
+    },
+  });
+
+  if (!user || !user.isActive) {
+    throw new AppError(
+      "User account is not available",
+      401,
+      "USER_NOT_AVAILABLE"
+    );
+  }
+
+  return {
+    user,
   };
 };
