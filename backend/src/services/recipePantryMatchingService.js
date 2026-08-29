@@ -1,8 +1,8 @@
 import prisma from "../config/database.js";
-
 import {
   normalizeIngredientName,
   compareIngredientQuantity,
+  convertUnitQuantity,
 } from "../utils/ingredientMatcher.js";
 
 const getAvailabilityStatus = ({
@@ -37,6 +37,7 @@ export const getRecipePantryAvailability = async ({
   userId,
   recipeId,
   pantryId,
+  servings,
 }) => {
   const recipe = await prisma.recipe.findFirst({
     where: {
@@ -66,15 +67,24 @@ export const getRecipePantryAvailability = async ({
     return null;
   }
 
+  const targetServings = servings ? Number(servings) : (recipe.servings || 1);
+  const baseServings = recipe.servings || 1;
+  const scalingMultiplier = targetServings / baseServings;
+
   const pantryItemsByName = new Map();
 
   for (const item of pantry.items) {
     const normalizedName = normalizeIngredientName(item.name);
-
     const existing = pantryItemsByName.get(normalizedName);
 
     if (existing) {
-      existing.quantity += item.quantity;
+      const convertedQty = convertUnitQuantity(item.quantity, item.unit, existing.unit);
+      if (convertedQty !== null) {
+        existing.quantity += convertedQty;
+      } else {
+        // Fallback if units cannot be converted
+        existing.quantity += item.quantity;
+      }
     } else {
       pantryItemsByName.set(normalizedName, {
         name: item.name,
@@ -86,6 +96,7 @@ export const getRecipePantryAvailability = async ({
 
   const ingredients = recipe.ingredients.map((ingredient) => {
     const normalizedName = normalizeIngredientName(ingredient.name);
+    const scaledRequiredQuantity = ingredient.quantity * scalingMultiplier;
 
     const pantryItem = pantryItemsByName.get(normalizedName);
 
@@ -93,7 +104,7 @@ export const getRecipePantryAvailability = async ({
       return {
         ingredientId: ingredient.id,
         name: ingredient.name,
-        requiredQuantity: ingredient.quantity,
+        requiredQuantity: scaledRequiredQuantity,
         requiredUnit: ingredient.unit,
         pantryQuantity: 0,
         pantryUnit: null,
@@ -103,7 +114,7 @@ export const getRecipePantryAvailability = async ({
 
     const status = getAvailabilityStatus({
       pantryQuantity: pantryItem.quantity,
-      requiredQuantity: ingredient.quantity,
+      requiredQuantity: scaledRequiredQuantity,
       requiredUnit: ingredient.unit,
       pantryUnit: pantryItem.unit,
     });
@@ -111,7 +122,7 @@ export const getRecipePantryAvailability = async ({
     return {
       ingredientId: ingredient.id,
       name: ingredient.name,
-      requiredQuantity: ingredient.quantity,
+      requiredQuantity: scaledRequiredQuantity,
       requiredUnit: ingredient.unit,
       pantryQuantity: pantryItem.quantity,
       pantryUnit: pantryItem.unit,
@@ -121,24 +132,17 @@ export const getRecipePantryAvailability = async ({
 
   const summary = {
     total: ingredients.length,
-    available: ingredients.filter(
-      (ingredient) => ingredient.status === "available"
-    ).length,
-    insufficient: ingredients.filter(
-      (ingredient) => ingredient.status === "insufficient"
-    ).length,
-    missing: ingredients.filter(
-      (ingredient) => ingredient.status === "missing"
-    ).length,
-    unitMismatch: ingredients.filter(
-      (ingredient) => ingredient.status === "unit_mismatch"
-    ).length,
+    available: ingredients.filter((ing) => ing.status === "available").length,
+    insufficient: ingredients.filter((ing) => ing.status === "insufficient").length,
+    missing: ingredients.filter((ing) => ing.status === "missing").length,
+    unitMismatch: ingredients.filter((ing) => ing.status === "unit_mismatch").length,
   };
 
   return {
     recipe: {
       id: recipe.id,
       title: recipe.title,
+      servings: targetServings,
     },
     pantry: {
       id: pantry.id,
