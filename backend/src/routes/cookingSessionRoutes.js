@@ -26,10 +26,9 @@ import {
 
 const router = express.Router();
 
-router.use(authenticate);
-
 router.post(
   "/recipes/:recipeId/cooking-sessions",
+  authenticate,
   startCookingSessionValidation,
   handleValidationErrors,
   startSession
@@ -37,6 +36,7 @@ router.post(
 
 router.get(
   "/cooking-sessions/:sessionId",
+  authenticate,
   cookingSessionIdValidation,
   handleValidationErrors,
   getSession
@@ -44,6 +44,7 @@ router.get(
 
 router.patch(
   "/cooking-sessions/:sessionId/progress",
+  authenticate,
   updateCookingProgressValidation,
   handleValidationErrors,
   updateProgress
@@ -51,6 +52,7 @@ router.patch(
 
 router.post(
   "/cooking-sessions/:sessionId/complete",
+  authenticate,
   completeCookingSessionValidation,
   handleValidationErrors,
   completeSession
