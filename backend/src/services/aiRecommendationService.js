@@ -1,14 +1,7 @@
 import prisma from "../config/database.js";
 import AppError from "../utils/AppError.js";
-
-import {
-  generateStructuredAIResponse,
-} from "./aiService.js";
-
-import {
-  aiRecommendationResponseSchema,
-} from "../schemas/aiRecommendationSchema.js";
-
+import { generateStructuredAIResponse } from "./aiService.js";
+import { aiRecommendationResponseSchema } from "../schemas/aiRecommendationSchema.js";
 import {
   buildAIRecommendationContext,
   buildAIRecommendationPrompt,
@@ -76,6 +69,48 @@ export const generateAIRecommendations = async ({
     }
   }
 
+  let userPreference = null;
+  if (prisma.userPreference) {
+    userPreference = await prisma.userPreference.findUnique({
+      where: { userId },
+    }).catch(() => null);
+  }
+
+  const mergedPreferences = {
+    cuisine: preferences.cuisine ?? null,
+    dietaryRequirements: [
+      ...new Set([
+        ...(userPreference?.dietaryPreferences ?? []),
+        ...(preferences.dietaryRequirements ?? []),
+      ]),
+    ],
+    allergies: [
+      ...new Set([
+        ...(userPreference?.allergies ?? []),
+        ...(preferences.allergies ?? []),
+      ]),
+    ],
+    dislikedIngredients: [
+      ...new Set([
+        ...(userPreference?.dislikedIngredients ?? []),
+        ...(preferences.dislikedIngredients ?? []),
+      ]),
+    ],
+    mealType: preferences.mealType ?? null,
+    maxPrepTime:
+      preferences.maxPrepTime ??
+      userPreference?.maxCookingMinutes ??
+      null,
+    budgetPriority:
+      preferences.budgetPriority ??
+      (userPreference?.defaultBudget ? "medium" : null),
+    servings:
+      preferences.servings ??
+      userPreference?.defaultServings ??
+      null,
+    additionalNotes: preferences.additionalNotes ?? null,
+  };
+
   const recipes = await prisma.recipe.findMany({
     where: {
       userId,
@@ -83,80 +118,52 @@ export const generateAIRecommendations = async ({
     orderBy: {
       title: "asc",
     },
-    select: {
-      id: true,
-      title: true,
-      description: true,
-      prepTime: true,
-      cookTime: true,
-      servings: true,
+    include: {
+      ingredients: true,
     },
   });
-
-  if (recipes.length === 0) {
-    throw new AppError(
-      "No recipes available for recommendations",
-      404,
-      "NO_RECIPES_AVAILABLE"
-    );
-  }
 
   const context = buildAIRecommendationContext({
     pantry,
     recipes,
     mealPlan,
-    preferences,
+    preferences: mergedPreferences,
   });
 
   const prompt = buildAIRecommendationPrompt({
     context,
   });
 
-  const recommendations =
-    await generateStructuredAIResponse({
-      systemInstruction: `
+  const response = await generateStructuredAIResponse({
+    systemInstruction: `
 You are PantryPal's AI meal recommendation assistant.
-
-Your job is to recommend practical recipes using the
-provided PantryPal context.
+Your job is to recommend practical, delicious, and waste-reducing recipes using the provided pantry context.
 
 Rules:
-
-- Use only recipes provided in the context.
-- Never invent recipe IDs.
-- Prefer recipes that use pantry ingredients.
-- Consider available pantry quantities.
-- Prioritize ingredients approaching expiry.
-- Respect meal plan budget when available.
-- Respect dietary requirements and user preferences.
-- Do not claim pantry ingredients that are not present.
-- Do not invent pantry quantities.
-- Clearly identify missing ingredients.
-- Provide realistic estimated costs.
-- Keep matchScore between 0 and 100.
-- Keep pantryUsage.percentage between 0 and 100.
-- Return only the structured response matching the schema.
-      `.trim(),
-
-      prompt,
-
-      responseSchema:
-        aiRecommendationResponseSchema,
-    });
+- Maximize the use of available pantry items.
+- Strictly honor dietary restrictions, allergies, and disliked ingredients.
+- Prioritize ingredients that are expiring soon to reduce waste.
+- Provide realistic matchScore and pantryUsage percentages (0-100).
+- Accurately list usedIngredients and missingIngredients.
+- Provide estimated costs for any missing ingredients.
+- Return structured JSON matching the provided schema.
+    `.trim(),
+    prompt,
+    responseSchema: aiRecommendationResponseSchema,
+  });
 
   return {
     pantry: {
       id: pantry.id,
       name: pantry.name,
     },
-
     mealPlan: mealPlan
       ? {
           id: mealPlan.id,
           name: mealPlan.name,
         }
       : null,
-
-    recommendations,
+    preferences: mergedPreferences,
+    recommendations: response.recommendations ?? [],
   };
 };
