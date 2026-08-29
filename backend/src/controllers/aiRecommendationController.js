@@ -14,11 +14,13 @@ export const generateAIRecommendationsController = async (
       mealPlanId: req.body.mealPlanId,
       preferences: {
         cuisine: req.body.cuisine,
-        dietaryRequirements:
-          req.body.dietaryRequirements,
+        dietaryRequirements: req.body.dietaryRequirements,
+        allergies: req.body.allergies,
+        dislikedIngredients: req.body.dislikedIngredients,
         mealType: req.body.mealType,
         maxPrepTime: req.body.maxPrepTime,
         budgetPriority: req.body.budgetPriority,
+        servings: req.body.servings,
         additionalNotes: req.body.additionalNotes,
       },
     });
