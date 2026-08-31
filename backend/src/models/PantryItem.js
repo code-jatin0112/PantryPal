@@ -112,3 +112,4 @@ pantryItemSchema.virtual("isLowStock").get(function () {
 export const PantryItem =
   mongoose.models.PantryItem || mongoose.model("PantryItem", pantryItemSchema);
 export default PantryItem;
+

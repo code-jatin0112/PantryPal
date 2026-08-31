@@ -108,3 +108,4 @@ export const ShoppingList =
   mongoose.models.ShoppingList ||
   mongoose.model("ShoppingList", shoppingListSchema);
 export default ShoppingList;
+

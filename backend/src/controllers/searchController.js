@@ -23,3 +23,4 @@ export const handleSearch = async (req, res, next) => {
     next(error);
   }
 };
+

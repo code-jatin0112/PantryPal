@@ -99,3 +99,4 @@ Base URL: `http://localhost:3000/api/v1`
 | :--- | :--- | :--- | :--- |
 | `GET` | `/dashboard/stats` | Retrieve all 10 KPI metrics | Yes |
 | `GET` | `/search` | Debounced multi-entity search | Yes |
+

@@ -27,3 +27,4 @@ router.get("/history", handleGetHistory);
 router.post("/:id/history", handleAddHistory);
 
 export default router;
+

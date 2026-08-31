@@ -93,3 +93,4 @@ export const IngredientCard = memo(
 IngredientCard.displayName = "IngredientCard";
 
 export default IngredientCard;
+

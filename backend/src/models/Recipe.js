@@ -174,3 +174,4 @@ recipeSchema.virtual("ratings", {
 export const Recipe =
   mongoose.models.Recipe || mongoose.model("Recipe", recipeSchema);
 export default Recipe;
+

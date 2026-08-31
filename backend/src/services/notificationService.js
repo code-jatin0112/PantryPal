@@ -104,3 +104,4 @@ export const createNotification = async ({
     createdAt: new Date(),
   };
 };
+

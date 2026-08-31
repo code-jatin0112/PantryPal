@@ -21,3 +21,4 @@ export const Loader = ({ message = "Loading...", fullScreen = false }) => {
 };
 
 export default Loader;
+

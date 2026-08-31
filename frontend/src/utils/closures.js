@@ -118,3 +118,4 @@ export const createApiWrapper = (baseEndpoint, defaultHeaders = {}) => {
     return response.json();
   };
 };
+

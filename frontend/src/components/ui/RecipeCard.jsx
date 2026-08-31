@@ -82,3 +82,4 @@ export const RecipeCard = memo(
 RecipeCard.displayName = "RecipeCard";
 
 export default RecipeCard;
+

@@ -8,3 +8,4 @@ export { RecipeRating } from "./RecipeRating.js";
 export { RecipeHistory } from "./RecipeHistory.js";
 export { Notification } from "./Notification.js";
 export { AIRequestLog } from "./AIRequestLog.js";
+

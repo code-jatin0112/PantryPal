@@ -69,3 +69,4 @@ export const RecipeHistory =
   mongoose.models.RecipeHistory ||
   mongoose.model("RecipeHistory", recipeHistorySchema);
 export default RecipeHistory;
+

@@ -89,3 +89,4 @@ export const RecipeRating =
   mongoose.models.RecipeRating ||
   mongoose.model("RecipeRating", recipeRatingSchema);
 export default RecipeRating;
+

@@ -35,3 +35,4 @@ export const restrictTo = (...allowedRoles) => {
 };
 
 export default restrictTo;
+

@@ -324,3 +324,4 @@ FULL OUTER JOIN (
   AND LOWER(TRIM(pi.name)) = LOWER(TRIM(sli.name))
 WHERE COALESCE(pi.user_id, sli.user_id) = 'a1b2c3d4-0000-0000-0000-000000000000';
 ```
+

@@ -110,3 +110,4 @@ export const FilterPanel = ({
 };
 
 export default FilterPanel;
+

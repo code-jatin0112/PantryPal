@@ -8,3 +8,4 @@ router.use(authenticate);
 router.get("/", handleSearch);
 
 export default router;
+

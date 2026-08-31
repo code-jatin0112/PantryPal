@@ -52,3 +52,4 @@ export const useFetch = (fetchFn, dependencies = []) => {
 };
 
 export default useFetch;
+

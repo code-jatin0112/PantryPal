@@ -98,3 +98,4 @@ export const getDashboardMetrics = async (userId) => {
     recentSessions: completedSessions.slice(0, 5),
   };
 };
+

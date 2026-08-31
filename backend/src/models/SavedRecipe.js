@@ -50,3 +50,4 @@ export const SavedRecipe =
   mongoose.models.SavedRecipe ||
   mongoose.model("SavedRecipe", savedRecipeSchema);
 export default SavedRecipe;
+

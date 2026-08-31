@@ -121,3 +121,4 @@ mealPlanSchema.virtual("totalMeals").get(function () {
 export const MealPlan =
   mongoose.models.MealPlan || mongoose.model("MealPlan", mealPlanSchema);
 export default MealPlan;
+

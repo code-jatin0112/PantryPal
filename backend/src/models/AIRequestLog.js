@@ -96,3 +96,4 @@ export const AIRequestLog =
   mongoose.models.AIRequestLog ||
   mongoose.model("AIRequestLog", aiRequestLogSchema);
 export default AIRequestLog;
+

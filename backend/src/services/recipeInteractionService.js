@@ -162,3 +162,4 @@ export const getRecipeHistory = async ({ userId, page = 1, limit = 20 }) => {
     limit,
   };
 };
+

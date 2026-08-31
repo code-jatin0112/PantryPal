@@ -9,3 +9,4 @@ router.get("/stats", getDashboardStats);
 router.get("/", getDashboardStats);
 
 export default router;
+
