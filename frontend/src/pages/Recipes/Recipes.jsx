@@ -365,3 +365,4 @@ export const Recipes = () => {
 };
 
 export default Recipes;
+

@@ -271,3 +271,4 @@ export const AIRecommendations = () => {
 };
 
 export default AIRecommendations;
+
