@@ -25,6 +25,10 @@ import aiRecommendationRoutes from "./routes/aiRecommendationRoutes.js";
 import recipeServingScalingRoutes from "./routes/recipeServingScalingRoutes.js";
 import userPreferenceRoutes from "./routes/userPreferenceRoutes.js";
 import aiChatRoutes from "./routes/aiChatRoutes.js";
+import notificationRoutes from "./routes/notificationRoutes.js";
+import dashboardRoutes from "./routes/dashboardRoutes.js";
+import searchRoutes from "./routes/searchRoutes.js";
+import recipeInteractionRoutes from "./routes/recipeInteractionRoutes.js";
 
 const app = express();
 
@@ -57,6 +61,7 @@ app.use("/api/v1/preferences", userPreferenceRoutes);
 app.use("/api/v1/pantries", pantryRoutes);
 app.use("/api/v1/pantries/:pantryId/items", pantryItemRoutes);
 app.use("/api/v1/recipes", recipeRoutes);
+app.use("/api/v1/recipes", recipeInteractionRoutes);
 app.use(
   "/api/v1/recipes/:recipeId/ingredients",
   recipeIngredientRoutes
@@ -78,6 +83,9 @@ app.use("/api/v1", cookingSessionRoutes);
 app.use("/api/v1/ai", aiRecipeRoutes);
 app.use("/api/v1/ai", aiRecommendationRoutes);
 app.use("/api/v1/ai", aiChatRoutes);
+app.use("/api/v1/notifications", notificationRoutes);
+app.use("/api/v1/dashboard", dashboardRoutes);
+app.use("/api/v1/search", searchRoutes);
 app.use(
   "/api/v1/recipes/:recipeId",
   recipeServingScalingRoutes

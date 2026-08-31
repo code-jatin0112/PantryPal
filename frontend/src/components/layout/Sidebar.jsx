@@ -138,3 +138,4 @@ export const Sidebar = ({ onNavigate, className = "" }) => {
 };
 
 export default Sidebar;
+
