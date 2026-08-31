@@ -1,16 +1,22 @@
-import Button from "./components/ui/Button";
+import React from "react";
+import { Routes, Route, Navigate } from "react-router-dom";
+
+import { AuthProvider } from "./contexts/AuthContext";
+import Login from "./pages/Auth/Login";
+import Register from "./pages/Auth/Register";
+import { ROUTES } from "./constants/routes";
 
 function App() {
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center gap-8 bg-[var(--color-background)]">
-      <h1 className="text-5xl font-bold text-[var(--color-text)]">
-        PantryPal
-      </h1>
-
-      <Button>
-        Get Started
-      </Button>
-    </div>
+    <AuthProvider>
+      <Routes>
+        <Route path={ROUTES.LOGIN} element={<Login />} />
+        <Route path={ROUTES.REGISTER} element={<Register />} />
+        {/* Default route redirects to Login for now */}
+        <Route path="/" element={<Navigate to={ROUTES.LOGIN} replace />} />
+        <Route path="*" element={<Navigate to={ROUTES.LOGIN} replace />} />
+      </Routes>
+    </AuthProvider>
   );
 }
 
