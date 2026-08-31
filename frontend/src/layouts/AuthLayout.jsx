@@ -1,13 +1,13 @@
 import React from "react";
 import { motion } from "framer-motion";
-import { UtensilsCrossed, Sparkles, Leaf, ShieldCheck, Clock, ChefHat } from "lucide-react";
+import { UtensilsCrossed, Sparkles, Leaf, ShieldCheck, ChefHat } from "lucide-react";
 
-export const AuthLayout = ({ children, title, subtitle }) => {
+export const AuthLayout = ({ children }) => {
   return (
     <div className="min-h-screen w-full bg-[#FAF8F3] text-[#272A1F] flex flex-col lg:flex-row">
       {/* Left Panel: Branding, Tagline, Value Props & Illustration */}
       <div className="lg:w-1/2 bg-gradient-to-br from-[#8A9070] via-[#757C5F] to-[#5E5947] text-white p-8 lg:p-16 flex flex-col justify-between relative overflow-hidden">
-        {/* Subtle Decorative Background Circles */}
+        {/* Subtle Decorative Background Elements */}
         <div className="absolute top-0 right-0 -mr-20 -mt-20 w-80 h-80 rounded-full bg-white/5 pointer-events-none blur-2xl" />
         <div className="absolute bottom-0 left-0 -ml-20 -mb-20 w-96 h-96 rounded-full bg-[#B8C39A]/10 pointer-events-none blur-3xl" />
 
@@ -49,7 +49,7 @@ export const AuthLayout = ({ children, title, subtitle }) => {
             </p>
           </motion.div>
 
-          {/* Feature Badge Grid / Subtle Illustration Showcase */}
+          {/* Feature Badges Showcase */}
           <div className="mt-10 grid grid-cols-1 sm:grid-cols-2 gap-4">
             <motion.div
               whileHover={{ y: -3 }}
@@ -105,13 +105,13 @@ export const AuthLayout = ({ children, title, subtitle }) => {
           </div>
         </div>
 
-        {/* Bottom: Trust note */}
+        {/* Bottom: Footer note */}
         <div className="relative z-10 text-xs text-white/60 flex items-center gap-2">
           <span>© {new Date().getFullYear()} PantryPal. Crafted for mindful cooking.</span>
         </div>
       </div>
 
-      {/* Right Panel: Form & Authentication Content */}
+      {/* Right Panel: Form & Authentication Content Container */}
       <div className="lg:w-1/2 flex items-center justify-center p-6 sm:p-10 lg:p-16">
         <motion.div
           initial={{ opacity: 0, x: 20 }}

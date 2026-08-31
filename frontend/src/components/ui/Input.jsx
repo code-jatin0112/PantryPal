@@ -91,7 +91,7 @@ export const Input = forwardRef(
               type="button"
               tabIndex={-1}
               onClick={() => setShowPassword(!showPassword)}
-              className="absolute right-3.5 p-1 text-[#5E5947]/70 hover:text-[#272A1F] focus:outline-none transition-colors"
+              className="absolute right-3.5 p-1 text-[#5E5947]/70 hover:text-[#272A1F] focus:outline-none transition-colors cursor-pointer"
               aria-label={showPassword ? "Hide password" : "Show password"}
             >
               {showPassword ? (
