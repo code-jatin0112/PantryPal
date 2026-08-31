@@ -17,6 +17,7 @@ import {
 } from "../../components/ui/Card";
 import Input from "../../components/ui/Input";
 import Button from "../../components/ui/Button";
+import { useAuth } from "../../hooks/useAuth";
 import { ROUTES } from "../../constants/routes";
 
 const loginSchema = z.object({
@@ -33,6 +34,7 @@ const loginSchema = z.object({
 
 export const Login = () => {
   const navigate = useNavigate();
+  const { login } = useAuth();
   const [authError, setAuthError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -54,12 +56,16 @@ export const Login = () => {
     setIsSubmitting(true);
 
     try {
-      // Login submission handling
       if (data.rememberMe) {
         localStorage.setItem("pantrypal_remember_email", data.email);
       } else {
         localStorage.removeItem("pantrypal_remember_email");
       }
+
+      await login({
+        email: data.email,
+        password: data.password,
+      });
 
       toast.success("Welcome back to PantryPal!");
       navigate(ROUTES.DASHBOARD || "/");
@@ -183,4 +189,3 @@ export const Login = () => {
 };
 
 export default Login;
-

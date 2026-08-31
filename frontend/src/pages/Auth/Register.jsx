@@ -17,6 +17,7 @@ import {
 } from "../../components/ui/Card";
 import Input from "../../components/ui/Input";
 import Button from "../../components/ui/Button";
+import { useAuth } from "../../hooks/useAuth";
 import { ROUTES } from "../../constants/routes";
 
 const registerSchema = z
@@ -46,6 +47,7 @@ const registerSchema = z
 
 export const Register = () => {
   const navigate = useNavigate();
+  const { register: registerUser } = useAuth();
   const [authError, setAuthError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -71,7 +73,12 @@ export const Register = () => {
     setIsSubmitting(true);
 
     try {
-      // Registration submission handling
+      await registerUser({
+        name: data.name,
+        email: data.email,
+        password: data.password,
+      });
+
       toast.success("Account created successfully! Welcome to PantryPal.");
       navigate(ROUTES.LOGIN);
     } catch (error) {
@@ -208,4 +215,3 @@ export const Register = () => {
 };
 
 export default Register;
-
