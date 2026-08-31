@@ -1,0 +1,31 @@
+:root {
+  /* Olive Garden Palette */
+  --color-parchment: #F4EBD8;
+  --color-sand: #D8C6A5;
+  --color-olive: #B8C39A;
+  --color-sage: #8A9070;
+  --color-bark: #5E5947;
+  --color-olivewood: #272A1F;
+
+  /* Semantic Colors */
+  --color-primary: var(--color-sage);
+  --color-primary-hover: #757C5F;
+
+  --color-secondary: var(--color-olive);
+
+  --color-background: #FAF8F3;
+  --color-surface: #FFFFFF;
+
+  --color-text: var(--color-olivewood);
+  --color-text-light: #6B6B6B;
+
+  --color-border: #E5E5E5;
+
+  --shadow-sm: 0 2px 8px rgba(0,0,0,.05);
+  --shadow-md: 0 8px 24px rgba(0,0,0,.08);
+  --shadow-lg: 0 18px 40px rgba(0,0,0,.12);
+
+  --radius-sm: 10px;
+  --radius-md: 16px;
+  --radius-lg: 24px;
+}
