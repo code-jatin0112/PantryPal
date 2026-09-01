@@ -42,17 +42,53 @@ const MatchBadge = ({ match }) => {
 };
 
 // ─── Recipe Detail Modal ───────────────────────────────────────────────────────
-const RecipeDetailModal = ({ recipe, pantryId, onClose, onFavoriteToggle, isFav }) => {
-  const [ingredients, setIngredients] = useState([]);
-  const [loading, setLoading] = useState(true);
+const RecipeDetailModal = ({ recipe, pantryId, onClose, onFavoriteToggle, isFav, onSaved }) => {
+  const toast = useToast();
+  const [ingredients, setIngredients] = useState(recipe.ingredients || []);
+  const [loading, setLoading] = useState(!recipe.ingredients);
   const [servings, setServings] = useState(recipe.servings || 2);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    getRecipeIngredients(recipe.id)
-      .then(r => setIngredients(r.data.data.ingredients || []))
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [recipe.id]);
+    if (Array.isArray(recipe.ingredients) && recipe.ingredients.length > 0) {
+      setIngredients(recipe.ingredients);
+      setLoading(false);
+      return;
+    }
+    if (recipe.id && recipe.id !== 'ai-preview') {
+      getRecipeIngredients(recipe.id)
+        .then(r => setIngredients(r.data.data.ingredients || []))
+        .catch(() => setIngredients([]))
+        .finally(() => setLoading(false));
+    } else {
+      setLoading(false);
+    }
+  }, [recipe]);
+
+  const handleSaveRecipe = async () => {
+    setSaving(true);
+    try {
+      const instructionsText = Array.isArray(recipe.instructions)
+        ? recipe.instructions.map((s, i) => `${i + 1}. ${typeof s === 'string' ? s : s.description}`).join('\n')
+        : recipe.instructions || 'Follow standard cooking directions.';
+
+      await createRecipe({
+        title: recipe.title || recipe.name || 'AI Generated Dish',
+        description: recipe.description || undefined,
+        instructions: instructionsText,
+        prepTime: recipe.prepTime ? parseInt(recipe.prepTime) : undefined,
+        cookTime: recipe.cookTime ? parseInt(recipe.cookTime) : undefined,
+        servings: servings ? parseInt(servings) : undefined,
+      });
+      toast('Recipe saved to My Recipes! 🍳', 'success');
+      onSaved?.();
+      onClose();
+    } catch (err) {
+      toast('Failed to save recipe to database.', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -280,7 +316,7 @@ const RecipeCard = ({ recipe, isFav, pantryMatch, onOpen, onFavoriteToggle, onDe
 // ─── Main Recipes Page ─────────────────────────────────────────────────────────
 const Recipes = () => {
   const toast = useToast();
-  const { activePantry } = usePantry();
+  const { activePantry, items = [] } = usePantry();
 
   const [recipes, setRecipes] = useState([]);
   const [favorites, setFavorites] = useState(new Set());
@@ -464,6 +500,7 @@ const Recipes = () => {
           onClose={() => setSelectedRecipe(null)}
           isFav={favorites.has(selectedRecipe.id)}
           onFavoriteToggle={handleFavoriteToggle}
+          onSaved={loadRecipes}
         />
       )}
       {showAIModal && (

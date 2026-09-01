@@ -13,24 +13,44 @@ export const usePantry = () => {
   const fetchPantries = useCallback(async () => {
     try {
       const res = await getPantries();
-      const list = res.data.data.pantries || [];
+      let list = res.data.data.pantries || [];
+
+      // Auto-provision a default pantry if the user doesn't have one yet
+      if (list.length === 0) {
+        try {
+          const createRes = await createPantry({ name: 'My Kitchen' });
+          const newPantry = createRes.data.data.pantry;
+          if (newPantry) {
+            list = [newPantry];
+          }
+        } catch (createErr) {
+          console.error("Auto-provision pantry error:", createErr);
+        }
+      }
+
       setPantries(list);
-      if (list.length > 0 && !activePantry) {
-        setActivePantry(list[0]);
+      if (list.length > 0) {
+        setActivePantry(prev => prev || list[0]);
+      } else {
+        setLoading(false);
       }
     } catch (err) {
       setError('Failed to load pantries.');
+      setLoading(false);
     }
   }, []);
 
   const fetchItems = useCallback(async (pantryId) => {
-    if (!pantryId) return;
+    if (!pantryId) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const [itemsRes, expiringRes, lowStockRes] = await Promise.all([
         getPantryItems(pantryId),
-        getExpiringItems(pantryId, 7),
-        getLowStockItems(pantryId),
+        getExpiringItems(pantryId, 7).catch(() => ({ data: { data: { items: [] } } })),
+        getLowStockItems(pantryId).catch(() => ({ data: { data: { items: [] } } })),
       ]);
       setItems(itemsRes.data.data.items || []);
       setExpiringItems(expiringRes.data.data.items || []);
@@ -53,7 +73,11 @@ export const usePantry = () => {
   }, [activePantry, fetchItems]);
 
   const refresh = () => {
-    if (activePantry?.id) fetchItems(activePantry.id);
+    if (activePantry?.id) {
+      fetchItems(activePantry.id);
+    } else {
+      fetchPantries();
+    }
   };
 
   return {
