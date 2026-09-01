@@ -5,19 +5,13 @@ import ProtectedRoute from './components/ProtectedRoute'
 import Login from './pages/Login'
 import Register from './pages/Register'
 import Pantry from './pages/Pantry'
+import Assistant from './pages/Assistant'
 
 // Placeholder Pages
 const Dashboard = () => (
   <div className="p-8">
     <h1 className="text-3xl font-bold text-sage mb-4">Smart Dashboard</h1>
     <p>Welcome to PantryPal. Here is an overview of your kitchen.</p>
-  </div>
-)
-
-const Assistant = () => (
-  <div className="p-8">
-    <h1 className="text-3xl font-bold text-sage mb-4">AI Kitchen Assistant</h1>
-    <p>Ask me what to cook based on what you already have!</p>
   </div>
 )
 
