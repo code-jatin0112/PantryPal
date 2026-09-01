@@ -4,7 +4,7 @@ import { usePantry } from '../hooks/usePantry';
 import {
   getRecipes, deleteRecipe, getFavoriteRecipes,
   addFavorite, removeFavorite, getRecipeIngredients,
-  getRecipePantryAvailability
+  getRecipePantryAvailability, createRecipe
 } from '../services/recipeService';
 import { generateAIRecipe } from '../services/aiService';
 import {
@@ -66,14 +66,16 @@ const RecipeDetailModal = ({ recipe, pantryId, onClose, onFavoriteToggle, isFav 
                 <span className="text-xs bg-olive/20 text-bark px-2 py-0.5 rounded-full">{recipe.cuisineType}</span>
               )}
             </div>
-            <h2 className="text-xl font-bold text-bark">{recipe.name}</h2>
+            <h2 className="text-xl font-bold text-bark">{recipe.title || recipe.name}</h2>
             {recipe.description && <p className="text-sage text-sm mt-1">{recipe.description}</p>}
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
-            <button onClick={() => onFavoriteToggle(recipe.id, isFav)}
-              className={`p-2 rounded-xl border transition-all ${isFav ? 'bg-red-50 border-red-200 text-red-500' : 'border-sage/30 text-sage hover:border-red-300 hover:text-red-400'}`}>
-              <Heart size={18} fill={isFav ? 'currentColor' : 'none'} />
-            </button>
+            {recipe.id !== 'ai-preview' && (
+              <button onClick={() => onFavoriteToggle(recipe.id, isFav)}
+                className={`p-2 rounded-xl border transition-all ${isFav ? 'bg-red-50 border-red-200 text-red-500' : 'border-sage/30 text-sage hover:border-red-300 hover:text-red-400'}`}>
+                <Heart size={18} fill={isFav ? 'currentColor' : 'none'} />
+              </button>
+            )}
             <button onClick={onClose} className="p-2 rounded-xl border border-sage/30 text-sage hover:text-bark transition-colors">
               <X size={18} />
             </button>
@@ -155,22 +157,37 @@ const RecipeDetailModal = ({ recipe, pantryId, onClose, onFavoriteToggle, isFav 
 };
 
 // ─── AI Generate Modal ─────────────────────────────────────────────────────────
-const AIGenerateModal = ({ onClose, onGenerated }) => {
+const AIGenerateModal = ({ pantry, pantryItemsCount, onClose, onGenerated }) => {
   const toast = useToast();
   const [prompt, setPrompt] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleGenerate = async () => {
     if (!prompt.trim()) return;
+    if (!pantry?.id) {
+      toast('Please create a pantry first in the My Pantry tab!', 'warning');
+      return;
+    }
+    if (pantryItemsCount === 0) {
+      toast('Your pantry has 0 ingredients! Please add ingredients to your pantry first so the AI can ground the recipe.', 'warning');
+      return;
+    }
+
     setLoading(true);
     try {
-      const res = await generateAIRecipe({ prompt: prompt.trim() });
-      const recipe = res.data.data?.recipe || res.data.data;
-      onGenerated(recipe);
-      toast('AI recipe generated! Review and save it.', 'success');
+      const res = await generateAIRecipe({ 
+        pantryId: pantry.id, 
+        preferences: prompt.trim() 
+      });
+      const recipeData = res.data.data?.recipe || res.data.data;
+      onGenerated(recipeData);
+      toast('AI recipe generated based on your pantry stock!', 'success');
       onClose();
     } catch (err) {
-      toast('Failed to generate recipe. Try again.', 'error');
+      const msg = err.response?.data?.error?.message 
+        || err.response?.data?.message 
+        || 'Failed to generate recipe. Try again.';
+      toast(msg, 'error');
     } finally {
       setLoading(false);
     }
@@ -183,14 +200,28 @@ const AIGenerateModal = ({ onClose, onGenerated }) => {
           <div className="w-10 h-10 bg-gradient-to-br from-sage to-bark rounded-xl flex items-center justify-center">
             <Sparkles size={20} className="text-white" />
           </div>
-          <h2 className="text-xl font-bold text-bark">Generate Recipe with AI</h2>
+          <div>
+            <h2 className="text-xl font-bold text-bark">Generate Recipe with AI</h2>
+            <p className="text-xs text-sage">Grounded in your active pantry stock</p>
+          </div>
         </div>
-        <p className="text-sage text-sm mb-4">Describe what you want to cook, and Gemini will create a full recipe for you.</p>
+
+        {pantryItemsCount === 0 && (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-4 text-xs text-amber-800 flex items-start gap-2">
+            <AlertCircle size={16} className="text-amber-600 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="font-semibold">Your pantry has 0 ingredients.</p>
+              <p className="mt-0.5">PantryPal's recipe generator uses your real pantry stock to design realistic recipes. Add ingredients in the <strong>My Pantry</strong> tab, or use the <strong>AI Assistant</strong> tab to brainstorm freely!</p>
+            </div>
+          </div>
+        )}
+
+        <p className="text-sage text-sm mb-3">Describe any cravings, cuisine preferences, or diet goals:</p>
         <textarea
           value={prompt}
           onChange={e => setPrompt(e.target.value)}
           rows={3}
-          placeholder="e.g. A healthy pasta dish with tomatoes and garlic under 30 minutes…"
+          placeholder="e.g. I want to make a burger with what I have…"
           className="w-full px-4 py-3 rounded-xl border border-sage/30 focus:border-olive focus:ring-2 focus:ring-olive/30 outline-none transition-all text-sm resize-none mb-4"
         />
         <div className="flex gap-3">
@@ -198,8 +229,8 @@ const AIGenerateModal = ({ onClose, onGenerated }) => {
             className="flex-1 py-2.5 rounded-xl border border-sage/30 text-sage font-medium text-sm hover:bg-sage/10 transition-colors">
             Cancel
           </button>
-          <button onClick={handleGenerate} disabled={!prompt.trim() || loading}
-            className="flex-1 py-2.5 rounded-xl bg-sage text-white font-medium text-sm hover:bg-bark transition-colors disabled:opacity-60 flex items-center justify-center gap-2">
+          <button onClick={handleGenerate} disabled={!prompt.trim() || loading || pantryItemsCount === 0}
+            className="flex-1 py-2.5 rounded-xl bg-sage text-white font-medium text-sm hover:bg-bark transition-colors disabled:opacity-50 flex items-center justify-center gap-2">
             {loading ? <><Loader2 size={16} className="animate-spin" /> Generating…</> : <><Sparkles size={16} /> Generate</>}
           </button>
         </div>
@@ -220,7 +251,7 @@ const RecipeCard = ({ recipe, isFav, pantryMatch, onOpen, onFavoriteToggle, onDe
           {recipe.difficulty && <DiffBadge level={recipe.difficulty} />}
           <MatchBadge match={pantryMatch} />
         </div>
-        <h3 className="font-bold text-bark leading-snug line-clamp-2">{recipe.name}</h3>
+        <h3 className="font-bold text-bark leading-snug line-clamp-2">{recipe.title || recipe.name}</h3>
       </div>
       <div className="flex items-center gap-1 flex-shrink-0" onClick={e => e.stopPropagation()}>
         <button onClick={() => onFavoriteToggle(recipe.id, isFav)}
@@ -437,6 +468,8 @@ const Recipes = () => {
       )}
       {showAIModal && (
         <AIGenerateModal
+          pantry={activePantry}
+          pantryItemsCount={items.length}
           onClose={() => setShowAIModal(false)}
           onGenerated={handleAIGenerated}
         />
