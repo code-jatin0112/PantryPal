@@ -3,6 +3,8 @@ import { useForm } from 'react-hook-form';
 import { createPantryItem, updatePantryItem, deletePantryItem } from '../services/pantryService';
 import { usePantry } from '../hooks/usePantry';
 import { useToast } from '../context/ToastContext';
+import { useDebouncedSearch } from '../hooks/useDebouncedSearch';
+import { formatIngredientQuantity } from '../utils/hoistingDemo';
 import { 
   Plus, Trash2, Edit2, X, AlertTriangle, 
   Package, TrendingDown, Calendar, RefreshCw, CheckCircle
@@ -205,7 +207,7 @@ const ItemCard = ({ item, pantryId, onRefresh }) => {
         </div>
 
         <div className="text-2xl font-bold text-bark mb-1">
-          {item.quantity} <span className="text-sm font-normal text-sage">{item.unit}</span>
+          {formatIngredientQuantity(item.quantity, item.unit)}
         </div>
 
         <div className="space-y-1 mt-2">
@@ -245,13 +247,13 @@ const Pantry = () => {
   } = usePantry();
 
   const [showAddItem, setShowAddItem] = useState(false);
-  const [search, setSearch] = useState('');
+  const [search, debouncedSearch, setSearch] = useDebouncedSearch('');
   const [categoryFilter, setCategoryFilter] = useState('All');
 
   const categories = ['All', ...new Set(items.map(i => i.category).filter(Boolean))];
 
   const filteredItems = items.filter(item => {
-    const matchSearch = item.name.toLowerCase().includes(search.toLowerCase());
+    const matchSearch = item.name.toLowerCase().includes(debouncedSearch.toLowerCase());
     const matchCategory = categoryFilter === 'All' || item.category === categoryFilter;
     return matchSearch && matchCategory;
   });

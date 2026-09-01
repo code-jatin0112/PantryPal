@@ -7,6 +7,8 @@ import {
   getRecipePantryAvailability, createRecipe
 } from '../services/recipeService';
 import { generateAIRecipe } from '../services/aiService';
+import { useDebouncedSearch } from '../hooks/useDebouncedSearch';
+import { formatIngredientQuantity } from '../utils/hoistingDemo';
 import {
   BookOpen, Heart, Trash2, Plus, X, Sparkles,
   Clock, Users, ChefHat, Search, Star, Package,
@@ -162,7 +164,7 @@ const RecipeDetailModal = ({ recipe, pantryId, onClose, onFavoriteToggle, isFav,
                   return (
                     <li key={i} className="flex items-center justify-between py-1.5 border-b border-sage/10 last:border-0 text-sm">
                       <span className="text-bark">{ing.name}</span>
-                      <span className="text-sage font-medium">{scaledQty} {ing.unit}</span>
+                      <span className="text-sage font-medium">{formatIngredientQuantity(scaledQty, ing.unit)}</span>
                     </li>
                   );
                 })}
@@ -322,7 +324,7 @@ const Recipes = () => {
   const [favorites, setFavorites] = useState(new Set());
   const [pantryMatches, setPantryMatches] = useState({});
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
+  const [search, debouncedSearch, setSearch] = useDebouncedSearch('');
   const [filter, setFilter] = useState('all'); // all | favorites | ai
   const [selectedRecipe, setSelectedRecipe] = useState(null);
   const [showAIModal, setShowAIModal] = useState(false);
@@ -399,7 +401,8 @@ const Recipes = () => {
   };
 
   const filtered = recipes.filter(r => {
-    const matchSearch = r.name.toLowerCase().includes(search.toLowerCase());
+    const title = r.title || r.name || '';
+    const matchSearch = title.toLowerCase().includes(debouncedSearch.toLowerCase());
     const matchFilter = filter === 'all' || (filter === 'favorites' && favorites.has(r.id));
     return matchSearch && matchFilter;
   });
