@@ -14,7 +14,11 @@ const Register = () => {
       setErrorMsg('');
       await registerUser(data.name, data.email, data.password);
     } catch (err) {
-      setErrorMsg(err.response?.data?.message || 'Registration failed. Please try again.');
+      const msg = err.response?.data?.error?.details?.[0]?.message 
+        || err.response?.data?.error?.message 
+        || err.response?.data?.message 
+        || 'Registration failed. Please try again.';
+      setErrorMsg(msg);
     }
   };
 
@@ -64,7 +68,7 @@ const Register = () => {
               type="password" 
               {...register('password', { 
                 required: 'Password is required',
-                minLength: { value: 6, message: 'Password must be at least 6 characters' }
+                minLength: { value: 8, message: 'Password must be at least 8 characters' }
               })}
               className="w-full px-4 py-3 rounded-xl border border-sage/30 focus:border-olive focus:ring-2 focus:ring-olive/50 outline-none transition-all"
               placeholder="••••••••"

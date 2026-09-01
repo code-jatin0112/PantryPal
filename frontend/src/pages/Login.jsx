@@ -14,7 +14,11 @@ const Login = () => {
       setErrorMsg('');
       await login(data.email, data.password);
     } catch (err) {
-      setErrorMsg(err.response?.data?.message || 'Login failed. Please check your credentials.');
+      const msg = err.response?.data?.error?.details?.[0]?.message 
+        || err.response?.data?.error?.message 
+        || err.response?.data?.message 
+        || 'Login failed. Please check your credentials.';
+      setErrorMsg(msg);
     }
   };
 
