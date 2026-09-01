@@ -1,6 +1,7 @@
 @import "tailwindcss";
 
 @theme {
+  --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
   --color-parchment: #FAF8F3;
   --color-sage: #8A9070;
   --color-olive: #B8C39A;
