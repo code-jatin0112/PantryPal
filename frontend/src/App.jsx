@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Routes, Route, NavLink } from 'react-router-dom'
-import { Utensils, LayoutDashboard, Sparkles, LogOut, Menu, X } from 'lucide-react'
+import { Utensils, LayoutDashboard, Sparkles, LogOut, Menu, X, BookOpen } from 'lucide-react'
 import { useAuth } from './context/AuthContext'
 import ProtectedRoute from './components/ProtectedRoute'
 import Login from './pages/Login'
@@ -8,10 +8,12 @@ import Register from './pages/Register'
 import Pantry from './pages/Pantry'
 import Assistant from './pages/Assistant'
 import Dashboard from './pages/Dashboard'
+import Recipes from './pages/Recipes'
 
 const navItems = [
   { to: '/',          icon: LayoutDashboard, label: 'Dashboard',    end: true },
   { to: '/pantry',    icon: Utensils,        label: 'My Pantry'           },
+  { to: '/recipes',   icon: BookOpen,        label: 'Recipes'             },
   { to: '/assistant', icon: Sparkles,        label: 'AI Assistant'        },
 ]
 
@@ -124,6 +126,7 @@ const AppLayout = () => {
           <Routes>
             <Route path="/"          element={<Dashboard />} />
             <Route path="/pantry"    element={<Pantry />} />
+            <Route path="/recipes"   element={<Recipes />} />
             <Route path="/assistant" element={<Assistant />} />
           </Routes>
         </main>
