@@ -4,19 +4,13 @@ import { useAuth } from './context/AuthContext'
 import ProtectedRoute from './components/ProtectedRoute'
 import Login from './pages/Login'
 import Register from './pages/Register'
+import Pantry from './pages/Pantry'
 
 // Placeholder Pages
 const Dashboard = () => (
   <div className="p-8">
     <h1 className="text-3xl font-bold text-sage mb-4">Smart Dashboard</h1>
     <p>Welcome to PantryPal. Here is an overview of your kitchen.</p>
-  </div>
-)
-
-const Pantry = () => (
-  <div className="p-8">
-    <h1 className="text-3xl font-bold text-sage mb-4">Pantry Inventory</h1>
-    <p>Manage your ingredients and track expiration dates.</p>
   </div>
 )
 
