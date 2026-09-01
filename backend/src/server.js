@@ -1,8 +1,12 @@
 import "dotenv/config";
 import app from "./app.js";
 import prisma from "./config/database.js";
+import { connectMongo, disconnectMongo } from "./config/mongo.js";
 
 const PORT = process.env.PORT || 3000;
+
+// Initialize NoSQL connection
+await connectMongo();
 
 const server = app.listen(PORT, () => {
   console.log(`PantryPal backend running on port ${PORT}`);
@@ -18,9 +22,10 @@ const handleGracefulShutdown = async (signal) => {
     }
 
     try {
-      console.log("Closing database connection...");
+      console.log("Closing database connections...");
       await prisma.$disconnect();
-      console.log("Database connection closed cleanly.");
+      await disconnectMongo();
+      console.log("Database connections closed cleanly.");
       process.exit(0);
     } catch (dbErr) {
       console.error("Error while disconnecting from database:", dbErr);
