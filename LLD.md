@@ -6755,3 +6755,53 @@ The Low-Level Design will be considered complete when the following areas have b
 The LLD is a living document and may be updated when implementation reveals a requirement that was not known during the initial design.
 
 Changes to the LLD should be documented through Git commits so that important architectural decisions remain traceable.
+
+---
+
+## 21. Frontend Implementation Design (React & JS)
+
+To ensure strict engineering standards and align with the core JavaScript and React concepts:
+
+### 21.1 Core React Patterns
+- **Component Composition:** The UI MUST be broken down into atomic components (`src/components/ui/`) and composed into feature components (`src/components/forms/`, `src/components/layout/`).
+- **State Management (`useState`):** Controlled inputs and local UI states MUST be managed via React's `useState` hook. Global state will use React Context.
+- **Side Effects (`useEffect`):** Component lifecycles and asynchronous data fetching MUST be executed within `useEffect`, with proper dependency arrays to prevent memory leaks and infinite loops.
+- **Client-Side Routing:** The app MUST use `react-router-dom` for seamless navigation without full page reloads.
+
+### 21.2 JavaScript Fundamentals
+- **Async/Await & Promises:** All API requests (via `axios`) MUST utilize modern `async/await` syntax, wrapped in `try/catch` for robust error handling.
+- **Closures:** High-order functions and event handlers MUST leverage closures to safely maintain local context state during rendering.
+
+---
+
+## 22. NoSQL Schema Modeling (MongoDB)
+
+While PostgreSQL manages relational integrity, MongoDB MUST handle unstructured, highly volatile document data.
+
+### 22.1 `AiInteractionLog` Schema
+This schema tracks the conversational history and AI usage telemetry.
+
+```javascript
+const AiInteractionLogSchema = new mongoose.Schema({
+  userId: { type: String, required: true, index: true },
+  messagePrompt: { type: String, required: true },
+  intentDetected: { type: String, required: true },
+  aiResponse: { type: mongoose.Schema.Types.Mixed }, // Flexible JSON response
+  tokenUsage: { type: Number, default: 0 },
+  createdAt: { type: Date, default: Date.now }
+});
+```
+
+### 22.2 `UnstructuredRecipe` Schema
+Tracks recipes generated on-the-fly that haven't been normalized into the relational PostgreSQL tables yet.
+
+```javascript
+const UnstructuredRecipeSchema = new mongoose.Schema({
+  userId: { type: String, required: true },
+  sourcePrompt: { type: String },
+  rawOutput: { type: mongoose.Schema.Types.Mixed },
+  createdAt: { type: Date, default: Date.now }
+});
+```
+
+These schemas ensure standard NoSQL **CRUD operations** are executed and validated independently of the Prisma PostgreSQL pipeline.

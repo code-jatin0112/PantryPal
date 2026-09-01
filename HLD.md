@@ -80,18 +80,16 @@ PantryPal uses a layered client-server architecture.
 
 ### 4.1 Frontend
 
-**React**
+**React 19 & Vite**
 
-React is used to build the user interface as a component-based application.
+React 19, bundled via Vite, is used to build the user interface as a modern Single Page Application (SPA).
 
-It is responsible for:
-
-- Rendering application pages
-- Managing UI state
-- Handling user interactions
-- Communicating with backend APIs
-- Displaying loading and error states
-- Providing reusable UI components
+It is strictly responsible for implementing core frontend patterns:
+- **Client-Side Routing:** Utilizing React Router for seamless navigation.
+- **State Management:** Using hooks like `useState` for predictable UI state mutations.
+- **Side Effects:** Employing `useEffect` for precise component lifecycle and API data fetching.
+- **Component Composition:** Structuring modular and reusable UI components.
+- **Responsive Layout:** Styling with Tailwind CSS v4.
 
 ---
 
@@ -151,23 +149,18 @@ PostgreSQL provides:
 
 ---
 
-### 4.4 Flexible Data Store
+### 4.4 Flexible Data Store (NoSQL)
 
 **MongoDB**
 
-MongoDB will be used selectively for data that benefits from a flexible document-oriented structure.
+MongoDB MUST be implemented to satisfy NoSQL schema modeling requirements. It will be used exclusively for unstructured or highly flexible document data.
 
-Potential use cases include:
+Mandatory Schema Implementations include:
+- **AI Interaction Records (`AiInteractionLog`):** Schema to capture unstructured chat history and conversation context.
+- **AI-Generated Recipe Documents (`UnstructuredRecipe`):** Schema to store deeply nested or varying recipe generation outputs.
+- **Recommendation Metadata:** To track contextual AI insights over time.
 
-- AI interaction records
-- AI-generated recipe documents
-- Conversation history
-- Flexible recommendation metadata
-- Other evolving document structures
-
-MongoDB will not be used simply to duplicate relational data stored in PostgreSQL.
-
-Each database will have a clearly defined responsibility.
+MongoDB will not be used simply to duplicate relational data stored in PostgreSQL. Each database will maintain a clearly defined responsibility, guaranteeing exposure to both relational (SQL) and non-relational (NoSQL) operations.
 
 ---
 

@@ -1440,3 +1440,21 @@ and PantryPal can turn that uncertainty into a practical decision:
 > **"You already have most of what you need for this meal. It serves four people, takes 20 minutes, costs approximately ₹60 in additional ingredients, and uses the tomatoes that should be consumed soon."**
 
 That is the core experience PantryPal is designed to deliver.
+
+---
+
+# 35. Technical & Engineering Alignment
+
+To satisfy both product scalability and rigorous engineering standards, PantryPal mandates the following technical requirements:
+
+## 35.1 Dual-Database Strategy
+- **Relational Data (PostgreSQL):** Used for strict relational modeling (Users, Pantries, Meal Plans, Recipes).
+- **Flexible Data (MongoDB / NoSQL):** MUST be utilized for tracking unstructured AI conversation histories, generated recommendation logs, and flexible recipes. This ensures schema modeling and CRUD operations in a NoSQL environment are fulfilled.
+
+## 35.2 Frontend Implementation Requirements
+The frontend must be a modern Single Page Application (SPA) built to strict engineering standards:
+- **Framework:** React 19 using Vite.
+- **State Management:** MUST utilize React `useState` and context hooks for predictable state mutations.
+- **Side Effects:** MUST manage component lifecycles and API data fetching strictly via `useEffect`.
+- **Routing:** MUST implement client-side routing (e.g., `react-router-dom`) across distinct pages (Dashboard, Pantry, AI Assistant).
+- **Network calls:** MUST handle asynchronous data fetching from the backend API.
