@@ -1,0 +1,17 @@
+@import "tailwindcss";
+
+@theme {
+  --color-parchment: #FAF8F3;
+  --color-sage: #8A9070;
+  --color-olive: #B8C39A;
+  --color-text-main: #272A1F;
+  --color-bark: #5E5947;
+}
+
+/* Custom base styles */
+@layer base {
+  body {
+    background-color: var(--color-parchment);
+    color: var(--color-text-main);
+  }
+}
