@@ -1,6 +1,7 @@
 import prisma from "../config/database.js";
 import { generateStructuredAIResponse } from "./aiService.js";
 import { aiChatResponseSchema } from "../schemas/aiChatSchema.js";
+import { AiInteractionLog } from "../models/AiInteractionLog.js";
 import {
   buildAIChatContext,
   buildAIChatPrompt,
@@ -87,6 +88,19 @@ Core Principles:
     responseSchema: aiChatResponseSchema,
   });
 
+  // Persist interaction telemetry into MongoDB (NoSQL)
+  try {
+    await AiInteractionLog.create({
+      userId,
+      messagePrompt: message,
+      intentDetected: response.intent || "KITCHEN_ASSISTANT",
+      aiResponse: response,
+      tokenUsage: message.length + JSON.stringify(response).length,
+    });
+  } catch (mongoErr) {
+    console.warn("MongoDB log save skipped:", mongoErr.message);
+  }
+
   return {
     reply: response.reply,
     intent: response.intent,
@@ -104,5 +118,13 @@ Core Principles:
       shoppingItemCount: shoppingItems.length,
     },
   };
+};
+
+export const getAiInteractionLogs = async (userId) => {
+  return await AiInteractionLog.find({ userId }).sort({ createdAt: -1 }).limit(50);
+};
+
+export const clearAiInteractionLogs = async (userId) => {
+  return await AiInteractionLog.deleteMany({ userId });
 };
 
