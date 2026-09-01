@@ -13,6 +13,7 @@ import {
   buildPantryContext,
   buildRecipeGenerationPrompt,
 } from "../utils/aiContextBuilder.js";
+import { UnstructuredRecipe } from "../models/UnstructuredRecipe.js";
 
 export const generateRecipeFromPantry = async ({
   userId,
@@ -97,6 +98,18 @@ Important rules:
     );
   }
 
+  // Persist unstructured recipe generation into MongoDB (NoSQL)
+  try {
+    await UnstructuredRecipe.create({
+      userId,
+      sourcePrompt: preferences || "Pantry Recipe Generation",
+      rawOutput: recipe,
+      conversionStatus: "NORMALIZED",
+    });
+  } catch (mongoErr) {
+    console.warn("MongoDB unstructured recipe save skipped:", mongoErr.message);
+  }
+
   return {
     pantry: {
       id: pantry.id,
@@ -104,4 +117,12 @@ Important rules:
     },
     recipe,
   };
+};
+
+export const getUnstructuredRecipes = async (userId) => {
+  return await UnstructuredRecipe.find({ userId }).sort({ createdAt: -1 });
+};
+
+export const deleteUnstructuredRecipe = async (recipeId, userId) => {
+  return await UnstructuredRecipe.findOneAndDelete({ _id: recipeId, userId });
 };
