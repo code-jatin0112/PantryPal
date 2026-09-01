@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
+import { useToast } from './ToastContext';
 
 const AuthContext = createContext();
 
@@ -13,6 +14,7 @@ export const AuthProvider = ({ children }) => {
   const [token, setToken] = useState(localStorage.getItem('token') || null);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
+  const toast = useToast();
 
   useEffect(() => {
     const verifyUser = async () => {
@@ -41,6 +43,7 @@ export const AuthProvider = ({ children }) => {
     localStorage.setItem('token', newToken);
     setToken(newToken);
     setUser(userData);
+    toast(`Welcome back, ${userData.name?.split(' ')[0]}! 👋`, 'success');
     navigate('/');
   };
 
@@ -50,6 +53,7 @@ export const AuthProvider = ({ children }) => {
     localStorage.setItem('token', newToken);
     setToken(newToken);
     setUser(userData);
+    toast(`Account created! Welcome to PantryPal 🎉`, 'success');
     navigate('/');
   };
 
@@ -57,6 +61,7 @@ export const AuthProvider = ({ children }) => {
     localStorage.removeItem('token');
     setToken(null);
     setUser(null);
+    toast('You have been signed out.', 'info');
     navigate('/login');
   };
 

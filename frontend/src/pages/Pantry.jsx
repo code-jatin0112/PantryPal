@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { createPantryItem, updatePantryItem, deletePantryItem } from '../services/pantryService';
 import { usePantry } from '../hooks/usePantry';
+import { useToast } from '../context/ToastContext';
 import { 
   Plus, Trash2, Edit2, X, AlertTriangle, 
   Package, TrendingDown, Calendar, RefreshCw, CheckCircle
@@ -9,6 +10,7 @@ import {
 
 // ─── Add/Edit Item Modal ─────────────────────────────────────────────────────
 const ItemModal = ({ pantryId, editItem, onClose, onSuccess }) => {
+  const toast = useToast();
   const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm({
     defaultValues: editItem ? {
       name: editItem.name,
@@ -32,12 +34,15 @@ const ItemModal = ({ pantryId, editItem, onClose, onSuccess }) => {
       };
       if (editItem) {
         await updatePantryItem(pantryId, editItem.id, payload);
+        toast(`"${payload.name}" updated successfully.`, 'success');
       } else {
         await createPantryItem(pantryId, payload);
+        toast(`"${payload.name}" added to your pantry!`, 'success');
       }
       onSuccess();
       onClose();
     } catch (err) {
+      toast('Failed to save item. Please try again.', 'error');
       console.error(err);
     }
   };
@@ -138,6 +143,7 @@ const AlertBadge = ({ count, icon: Icon, label, color }) => {
 
 // ─── Item Card ───────────────────────────────────────────────────────────────
 const ItemCard = ({ item, pantryId, onRefresh }) => {
+  const toast = useToast();
   const [deleting, setDeleting] = useState(false);
   const [editing, setEditing] = useState(false);
 
@@ -154,8 +160,10 @@ const ItemCard = ({ item, pantryId, onRefresh }) => {
     setDeleting(true);
     try {
       await deletePantryItem(pantryId, item.id);
+      toast(`"${item.name}" removed from pantry.`, 'info');
       onRefresh();
     } catch (err) {
+      toast('Failed to remove item.', 'error');
       console.error(err);
       setDeleting(false);
     }
