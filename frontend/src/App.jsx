@@ -6,15 +6,9 @@ import Login from './pages/Login'
 import Register from './pages/Register'
 import Pantry from './pages/Pantry'
 import Assistant from './pages/Assistant'
+import Dashboard from './pages/Dashboard'
 
 // Placeholder Pages
-const Dashboard = () => (
-  <div className="p-8">
-    <h1 className="text-3xl font-bold text-sage mb-4">Smart Dashboard</h1>
-    <p>Welcome to PantryPal. Here is an overview of your kitchen.</p>
-  </div>
-)
-
 const AppLayout = () => {
   const { logout, user } = useAuth();
   
