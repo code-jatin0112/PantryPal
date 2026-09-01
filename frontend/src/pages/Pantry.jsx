@@ -269,14 +269,12 @@ const Pantry = () => {
             className="p-2.5 rounded-xl border border-sage/30 text-sage hover:text-bark hover:border-bark transition-colors">
             <RefreshCw size={18} />
           </button>
-          {activePantry && (
-            <button
-              onClick={() => setShowAddItem(true)}
-              className="flex items-center gap-2 px-4 py-2.5 bg-sage text-white rounded-xl hover:bg-bark transition-colors font-medium text-sm shadow-md"
-            >
-              <Plus size={18} /> Add Ingredient
-            </button>
-          )}
+          <button
+            onClick={() => setShowAddItem(true)}
+            className="flex items-center gap-2 px-4 py-2.5 bg-sage text-white rounded-xl hover:bg-bark transition-colors font-medium text-sm shadow-md"
+          >
+            <Plus size={18} /> Add Ingredient
+          </button>
         </div>
       </div>
 
@@ -289,72 +287,61 @@ const Pantry = () => {
         </div>
       )}
 
-      {/* No Pantry State */}
-      {pantries.length === 0 && !loading && (
-        <div className="text-center py-16 bg-white rounded-2xl border border-sage/20">
-          <Package size={48} className="mx-auto text-olive mb-4" />
-          <h2 className="text-xl font-bold text-bark mb-2">No Pantry Yet</h2>
-          <p className="text-sage mb-6">Create your first pantry to start tracking your ingredients.</p>
-          <button
-            onClick={async () => {
-              await createPantry({ name: 'My Kitchen' });
-              fetchPantries();
-            }}
-            className="px-6 py-3 bg-sage text-white rounded-xl hover:bg-bark transition-colors font-medium"
-          >
-            Create My Pantry
-          </button>
+      {/* Search + Filter */}
+      <div className="flex flex-col sm:flex-row gap-3 mb-6">
+        <input
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Search ingredients..."
+          className="flex-1 px-4 py-2.5 rounded-xl border border-sage/30 focus:border-olive focus:ring-2 focus:ring-olive/30 outline-none transition-all text-sm"
+        />
+        <div className="flex gap-2 overflow-x-auto">
+          {categories.map(cat => (
+            <button key={cat}
+              onClick={() => setCategoryFilter(cat)}
+              className={`px-3 py-2 rounded-xl text-sm font-medium whitespace-nowrap transition-colors ${
+                categoryFilter === cat
+                  ? 'bg-sage text-white'
+                  : 'border border-sage/30 text-sage hover:border-bark hover:text-bark'
+              }`}
+            >
+              {cat}
+            </button>
+          ))}
         </div>
-      )}
+      </div>
 
-      {activePantry && (
-        <>
-          {/* Search + Filter */}
-          <div className="flex flex-col sm:flex-row gap-3 mb-6">
-            <input
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              placeholder="Search ingredients..."
-              className="flex-1 px-4 py-2.5 rounded-xl border border-sage/30 focus:border-olive focus:ring-2 focus:ring-olive/30 outline-none transition-all text-sm"
-            />
-            <div className="flex gap-2 overflow-x-auto">
-              {categories.map(cat => (
-                <button key={cat}
-                  onClick={() => setCategoryFilter(cat)}
-                  className={`px-3 py-2 rounded-xl text-sm font-medium whitespace-nowrap transition-colors ${
-                    categoryFilter === cat
-                      ? 'bg-sage text-white'
-                      : 'border border-sage/30 text-sage hover:border-bark hover:text-bark'
-                  }`}
-                >
-                  {cat}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Items Grid */}
-          {loading ? (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-              {Array.from({ length: 10 }).map((_, i) => (
-                <div key={i} className="bg-white rounded-2xl border border-sage/10 p-4 animate-pulse h-32" />
-              ))}
-            </div>
-          ) : filteredItems.length === 0 ? (
-            <div className="text-center py-16">
-              <Package size={40} className="mx-auto text-olive mb-3" />
-              <p className="text-sage text-lg">
-                {search ? `No ingredients matching "${search}"` : 'Your pantry is empty. Add your first ingredient!'}
-              </p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-              {filteredItems.map(item => (
-                <ItemCard key={item.id} item={item} pantryId={activePantry.id} onRefresh={refresh} />
-              ))}
-            </div>
+      {/* Items Grid */}
+      {loading ? (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+          {Array.from({ length: 10 }).map((_, i) => (
+            <div key={i} className="bg-white rounded-2xl border border-sage/10 p-4 animate-pulse h-32" />
+          ))}
+        </div>
+      ) : filteredItems.length === 0 ? (
+        <div className="text-center py-16 bg-white rounded-2xl border border-sage/20 p-6">
+          <Package size={44} className="mx-auto text-olive mb-3" />
+          <h3 className="text-lg font-bold text-bark mb-1">
+            {search ? `No ingredients matching "${search}"` : 'Your pantry is empty'}
+          </h3>
+          <p className="text-sage text-sm mb-5">
+            {search ? 'Try clearing your search or filter.' : 'Add your first ingredient to start tracking stock and generating AI recipes!'}
+          </p>
+          {!search && (
+            <button
+              onClick={() => setShowAddItem(true)}
+              className="px-5 py-2.5 bg-sage text-white rounded-xl hover:bg-bark transition-colors font-medium text-sm shadow-sm inline-flex items-center gap-2"
+            >
+              <Plus size={16} /> Add First Ingredient
+            </button>
           )}
-        </>
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+          {filteredItems.map(item => (
+            <ItemCard key={item.id} item={item} pantryId={activePantry?.id} onRefresh={refresh} />
+          ))}
+        </div>
       )}
 
       {/* Add Item Modal */}
