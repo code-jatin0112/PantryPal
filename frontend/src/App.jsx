@@ -29,6 +29,7 @@ const CreateMealPlan     = lazy(() => import('./pages/MealPlans/CreateMealPlan')
 const EditMealPlan       = lazy(() => import('./pages/MealPlans/EditMealPlan'));
 const MealPlanner        = lazy(() => import('./pages/MealPlanner'));
 const Assistant          = lazy(() => import('./pages/Assistant'));
+const Settings           = lazy(() => import('./pages/Settings/Settings'));
 const Preferences        = lazy(() => import('./pages/Preferences'));
 const Profile            = lazy(() => import('./pages/Profile'));
 
@@ -77,6 +78,7 @@ const AppLayout = () => {
             <Route path="/meal-plans/:id/edit" element={<EditMealPlan />} />
             <Route path="/meal-planner"        element={<MealPlanner />} />
             <Route path="/assistant"           element={<Assistant />} />
+            <Route path="/settings"            element={<Settings />} />
             <Route path="/preferences"         element={<Preferences />} />
             <Route path="/profile"             element={<Profile />} />
             <Route path="*"                    element={<NotFound />} />
