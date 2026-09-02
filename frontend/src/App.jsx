@@ -16,6 +16,9 @@ const Pantry         = lazy(() => import('./pages/Pantry'));
 const AddPantryItem  = lazy(() => import('./pages/Pantry/AddPantryItem'));
 const EditPantryItem = lazy(() => import('./pages/Pantry/EditPantryItem'));
 const Recipes        = lazy(() => import('./pages/Recipes'));
+const RecipeDetails  = lazy(() => import('./pages/Recipes/RecipeDetails'));
+const CreateRecipe   = lazy(() => import('./pages/Recipes/CreateRecipe'));
+const EditRecipe     = lazy(() => import('./pages/Recipes/EditRecipe'));
 const ShoppingList   = lazy(() => import('./pages/ShoppingList'));
 const MealPlanner    = lazy(() => import('./pages/MealPlanner'));
 const Assistant      = lazy(() => import('./pages/Assistant'));
@@ -53,6 +56,9 @@ const AppLayout = () => {
             <Route path="/pantry/add"       element={<AddPantryItem />} />
             <Route path="/pantry/:id/edit"  element={<EditPantryItem />} />
             <Route path="/recipes"          element={<Recipes />} />
+            <Route path="/recipes/new"      element={<CreateRecipe />} />
+            <Route path="/recipes/:id"      element={<RecipeDetails />} />
+            <Route path="/recipes/:id/edit" element={<EditRecipe />} />
             <Route path="/shopping-list"    element={<ShoppingList />} />
             <Route path="/meal-planner"     element={<MealPlanner />} />
             <Route path="/assistant"        element={<Assistant />} />
