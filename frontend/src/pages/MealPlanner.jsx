@@ -1,39 +1,49 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useForm } from 'react-hook-form';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useToast } from '../context/ToastContext';
 import {
   getMealPlans, createMealPlan, deleteMealPlan,
   getMealPlanById, addDish, deleteDish, getGroceryRequirements
 } from '../services/mealPlanService';
 import { getRecipes } from '../services/recipeService';
+import { getErrorMessage } from '../utils/errorHandler';
+import Modal from '../components/ui/Modal';
+import Button from '../components/ui/Button';
+import ConfirmDialog from '../components/ui/ConfirmDialog';
+import { EmptyState } from '../components/ui/EmptyState';
+import Spinner from '../components/ui/Spinner';
 import {
-  CalendarDays, Plus, Trash2, X, ChefHat, ShoppingCart,
-  Loader2, Clock, CheckCircle2, FileText, ChevronRight,
-  AlertCircle, Utensils
+  CalendarDays, Plus, Trash2, ChefHat, ShoppingCart,
+  Clock, CheckCircle2, Utensils,
 } from 'lucide-react';
 
-// ─── Status Badge ──────────────────────────────────────────────────────────────
-const StatusBadge = ({ status }) => {
-  const map = {
-    DRAFT:     'bg-amber-100 text-amber-700',
-    ACTIVE:    'bg-green-100 text-green-700',
-    COMPLETED: 'bg-sage/20 text-sage',
-  };
-  return (
-    <span className={`text-xs font-semibold px-2.5 py-0.5 rounded-full ${map[status] || 'bg-sage/20 text-sage'}`}>
-      {status}
-    </span>
-  );
+// ── Meal type color map ───────────────────────────────────
+const MEAL_COLORS = {
+  BREAKFAST: 'bg-[var(--color-warning-bg)] text-[var(--color-warning)]',
+  LUNCH:     'bg-[var(--color-info-bg)] text-[var(--color-info)]',
+  DINNER:    'bg-[rgba(138,104,163,0.12)] text-[#8268A3]',
+  SNACK:     'bg-[rgba(138,144,112,0.12)] text-[var(--color-sage)]',
 };
 
-// ─── Create Plan Modal ─────────────────────────────────────────────────────────
-const CreatePlanModal = ({ onClose, onCreated }) => {
+// ── Status Badge ──────────────────────────────────────────
+const StatusBadge = ({ status }) => {
+  const styles = {
+    DRAFT:     'badge-warning',
+    ACTIVE:    'badge-success',
+    COMPLETED: 'badge-neutral',
+  }[status] || 'badge-neutral';
+  return <span className={`badge ${styles}`}>{status}</span>;
+};
+
+// ── Create Plan Modal ─────────────────────────────────────
+const CreatePlanModal = ({ isOpen, onClose, onCreated }) => {
   const toast = useToast();
   const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm({
     defaultValues: {
       startDate: new Date().toISOString().split('T')[0],
       endDate:   new Date(Date.now() + 6 * 86400000).toISOString().split('T')[0],
-    }
+    },
   });
 
   const onSubmit = async (data) => {
@@ -42,115 +52,90 @@ const CreatePlanModal = ({ onClose, onCreated }) => {
       toast(`Meal plan "${data.name}" created!`, 'success');
       onCreated(res.data.data.mealPlan);
       onClose();
-    } catch {
-      toast('Failed to create meal plan.', 'error');
+    } catch (err) {
+      toast(getErrorMessage(err), 'error');
     }
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
-        <div className="flex items-center justify-between mb-5">
-          <h2 className="text-xl font-bold text-bark">New Meal Plan</h2>
-          <button onClick={onClose} className="text-sage hover:text-bark transition-colors"><X size={20} /></button>
+    <Modal isOpen={isOpen} onClose={onClose} title="New Meal Plan">
+      <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+        <div className="flex flex-col gap-1.5">
+          <label className="text-sm font-semibold text-[var(--color-dark)]">Plan Name *</label>
+          <input className={`input ${errors.name ? 'input-error' : ''}`}
+            placeholder="e.g. This Week's Meals"
+            {...register('name', { required: 'Name is required' })} />
+          {errors.name && <p className="text-xs text-[var(--color-danger)]">{errors.name.message}</p>}
         </div>
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-bark mb-1">Plan Name</label>
-            <input {...register('name', { required: 'Name is required' })}
-              className="w-full px-4 py-2.5 rounded-xl border border-sage/30 focus:border-olive focus:ring-2 focus:ring-olive/30 outline-none transition-all text-sm"
-              placeholder="e.g. This Week's Meals"
-            />
-            {errors.name && <p className="text-red-500 text-xs mt-1">{errors.name.message}</p>}
+        <div className="grid grid-cols-2 gap-3">
+          <div className="flex flex-col gap-1.5">
+            <label className="text-sm font-semibold text-[var(--color-dark)]">Start Date</label>
+            <input type="date" className="input" {...register('startDate', { required: true })} />
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-sm font-medium text-bark mb-1">Start Date</label>
-              <input type="date" {...register('startDate', { required: true })}
-                className="w-full px-4 py-2.5 rounded-xl border border-sage/30 focus:border-olive focus:ring-2 focus:ring-olive/30 outline-none transition-all text-sm"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-bark mb-1">End Date</label>
-              <input type="date" {...register('endDate', { required: true })}
-                className="w-full px-4 py-2.5 rounded-xl border border-sage/30 focus:border-olive focus:ring-2 focus:ring-olive/30 outline-none transition-all text-sm"
-              />
-            </div>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-sm font-semibold text-[var(--color-dark)]">End Date</label>
+            <input type="date" className="input" {...register('endDate', { required: true })} />
           </div>
-          <div className="flex gap-3 pt-1">
-            <button type="button" onClick={onClose}
-              className="flex-1 py-2.5 rounded-xl border border-sage/30 text-sage font-medium text-sm hover:bg-sage/10 transition-colors">
-              Cancel
-            </button>
-            <button type="submit" disabled={isSubmitting}
-              className="flex-1 py-2.5 rounded-xl bg-sage text-white font-medium text-sm hover:bg-bark transition-colors disabled:opacity-60">
-              {isSubmitting ? 'Creating…' : 'Create Plan'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+        </div>
+        <Button type="submit" variant="primary" fullWidth loading={isSubmitting}>
+          Create Plan
+        </Button>
+      </form>
+    </Modal>
   );
 };
 
-// ─── Grocery List Modal ────────────────────────────────────────────────────────
-const GroceryModal = ({ mealPlanId, pantryId, onClose }) => {
+// ── Grocery Modal ─────────────────────────────────────────
+const GroceryModal = ({ isOpen, onClose, mealPlanId }) => {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    getGroceryRequirements(mealPlanId, { pantryId })
-      .then(r => setItems(r.data.data?.groceryItems || r.data.data?.items || []))
+    if (!isOpen) return;
+    setLoading(true);
+    getGroceryRequirements(mealPlanId, {})
+      .then((r) => setItems(r.data.data?.groceryItems || r.data.data?.items || []))
       .catch(() => setItems([]))
       .finally(() => setLoading(false));
-  }, [mealPlanId, pantryId]);
+  }, [isOpen, mealPlanId]);
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
-        <div className="flex items-center justify-between p-5 border-b border-sage/20">
-          <h2 className="font-bold text-bark flex items-center gap-2">
-            <ShoppingCart size={18} className="text-sage" /> Grocery Requirements
-          </h2>
-          <button onClick={onClose} className="text-sage hover:text-bark transition-colors"><X size={18} /></button>
+    <Modal isOpen={isOpen} onClose={onClose} title="Grocery Requirements" size="sm">
+      {loading ? (
+        <Spinner center label="Calculating…" />
+      ) : items.length === 0 ? (
+        <div className="py-8 text-center">
+          <CheckCircle2 size={40} className="mx-auto text-[var(--color-success)] mb-3" />
+          <p className="font-bold text-[var(--color-dark)] mb-1">You have everything!</p>
+          <p className="text-sm text-[var(--color-sage)]">Your pantry covers this entire meal plan.</p>
         </div>
-        <div className="p-5">
-          {loading ? (
-            <div className="flex items-center gap-2 text-sage py-4 justify-center">
-              <Loader2 size={18} className="animate-spin" /> Calculating…
+      ) : (
+        <div className="space-y-2 max-h-72 overflow-y-auto">
+          {items.map((item, i) => (
+            <div key={i} className="flex items-center justify-between py-2.5 border-b border-[rgba(138,144,112,0.10)] last:border-0 text-sm">
+              <span className="font-semibold text-[var(--color-dark)]">{item.name || item.ingredientName}</span>
+              <span className="text-[var(--color-sage)]">{item.requiredQuantity || item.quantity} {item.unit}</span>
             </div>
-          ) : items.length === 0 ? (
-            <div className="text-center py-6">
-              <CheckCircle2 size={36} className="mx-auto text-green-500 mb-2" />
-              <p className="font-semibold text-bark">You have everything you need!</p>
-              <p className="text-sage text-sm mt-1">Your pantry covers this entire meal plan.</p>
-            </div>
-          ) : (
-            <div className="space-y-2 max-h-72 overflow-y-auto">
-              {items.map((item, i) => (
-                <div key={i} className="flex items-center justify-between py-2 border-b border-sage/10 last:border-0 text-sm">
-                  <span className="text-bark font-medium">{item.name || item.ingredientName}</span>
-                  <span className="text-sage">{item.requiredQuantity || item.quantity} {item.unit}</span>
-                </div>
-              ))}
-            </div>
-          )}
+          ))}
         </div>
-      </div>
-    </div>
+      )}
+    </Modal>
   );
 };
 
-// ─── Plan Detail Panel ─────────────────────────────────────────────────────────
-const PlanDetail = ({ planId, recipes, onDishAdded, onDishDeleted }) => {
+// ── Plan Detail Panel ─────────────────────────────────────
+const PlanDetail = ({ planId, recipes }) => {
   const toast = useToast();
-  const [plan, setPlan] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [showAddDish, setShowAddDish] = useState(false);
-  const [selectedRecipeId, setSelectedRecipeId] = useState('');
-  const [mealType, setMealType] = useState('DINNER');
-  const [plannedDate, setPlannedDate] = useState(new Date().toISOString().split('T')[0]);
-  const [adding, setAdding] = useState(false);
+  const [plan, setPlan]           = useState(null);
+  const [loading, setLoading]     = useState(true);
+  const [showAdd, setShowAdd]     = useState(false);
+  const [recipeId, setRecipeId]   = useState('');
+  const [mealType, setMealType]   = useState('DINNER');
+  const [date, setDate]           = useState(new Date().toISOString().split('T')[0]);
+  const [adding, setAdding]       = useState(false);
+  const [deleteDishId, setDeleteDishId] = useState(null);
+  const [deleteDishName, setDeleteDishName] = useState('');
+  const [deleting, setDeleting]   = useState(false);
   const [showGrocery, setShowGrocery] = useState(false);
 
   const load = useCallback(async () => {
@@ -158,8 +143,8 @@ const PlanDetail = ({ planId, recipes, onDishAdded, onDishDeleted }) => {
     try {
       const res = await getMealPlanById(planId);
       setPlan(res.data.data.mealPlan);
-    } catch {
-      toast('Failed to load plan details.', 'error');
+    } catch (err) {
+      toast(getErrorMessage(err), 'error');
     } finally {
       setLoading(false);
     }
@@ -168,41 +153,37 @@ const PlanDetail = ({ planId, recipes, onDishAdded, onDishDeleted }) => {
   useEffect(() => { load(); }, [load]);
 
   const handleAddDish = async () => {
-    if (!selectedRecipeId) return;
+    if (!recipeId) return;
     setAdding(true);
     try {
-      await addDish(planId, { recipeId: selectedRecipeId, mealType, plannedDate });
-      toast('Dish added to plan!', 'success');
-      setShowAddDish(false);
+      await addDish(planId, { recipeId, mealType, plannedDate: date });
+      toast('Dish added to plan! 🍽️', 'success');
+      setShowAdd(false);
       load();
-      onDishAdded?.();
-    } catch {
-      toast('Failed to add dish.', 'error');
+    } catch (err) {
+      toast(getErrorMessage(err), 'error');
     } finally {
       setAdding(false);
     }
   };
 
-  const handleDeleteDish = async (dishId, dishName) => {
+  const handleDeleteDish = async () => {
+    setDeleting(true);
     try {
-      await deleteDish(planId, dishId);
-      toast(`"${dishName}" removed from plan.`, 'info');
+      await deleteDish(planId, deleteDishId);
+      toast(`"${deleteDishName}" removed.`, 'info');
+      setDeleteDishId(null);
       load();
-      onDishDeleted?.();
-    } catch {
-      toast('Failed to remove dish.', 'error');
+    } catch (err) {
+      toast(getErrorMessage(err), 'error');
+    } finally {
+      setDeleting(false);
     }
   };
 
-  if (loading) return (
-    <div className="flex-1 flex items-center justify-center">
-      <Loader2 size={28} className="animate-spin text-sage" />
-    </div>
-  );
-
+  if (loading) return <div className="flex-1 flex items-center justify-center"><Spinner size="lg" /></div>;
   if (!plan) return null;
 
-  // Group dishes by date
   const byDate = (plan.dishes || []).reduce((acc, dish) => {
     const d = dish.plannedDate ? dish.plannedDate.split('T')[0] : 'Unscheduled';
     if (!acc[d]) acc[d] = [];
@@ -210,96 +191,99 @@ const PlanDetail = ({ planId, recipes, onDishAdded, onDishDeleted }) => {
     return acc;
   }, {});
 
-  const mealTypes = ['BREAKFAST', 'LUNCH', 'DINNER', 'SNACK'];
-
   return (
-    <div className="flex-1 overflow-y-auto p-6 space-y-6">
-      {/* Plan Header */}
-      <div className="flex items-start justify-between">
+    <div className="flex-1 overflow-y-auto p-6 space-y-5">
+      {/* Plan header */}
+      <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <h2 className="text-xl font-bold text-bark">{plan.name}</h2>
-          <p className="text-sage text-sm mt-0.5">
-            {new Date(plan.startDate).toLocaleDateString()} – {new Date(plan.endDate).toLocaleDateString()}
+          <h2 className="text-xl font-bold text-[var(--color-dark)]">{plan.name}</h2>
+          <p className="text-sm text-[var(--color-sage)] mt-0.5">
+            {new Date(plan.startDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} –{' '}
+            {new Date(plan.endDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <button onClick={() => setShowGrocery(true)}
-            className="flex items-center gap-2 px-3 py-2 rounded-xl border border-sage/30 text-sage hover:text-bark hover:border-bark transition-colors text-sm font-medium">
-            <ShoppingCart size={15} /> Grocery List
-          </button>
-          <button onClick={() => setShowAddDish(true)}
-            className="flex items-center gap-2 px-3 py-2 rounded-xl bg-sage text-white hover:bg-bark transition-colors text-sm font-medium">
-            <Plus size={15} /> Add Dish
-          </button>
+        <div className="flex gap-2 flex-shrink-0">
+          <Button variant="secondary" size="sm" icon={ShoppingCart} onClick={() => setShowGrocery(true)}>
+            Grocery List
+          </Button>
+          <Button variant="primary" size="sm" icon={Plus} onClick={() => setShowAdd(!showAdd)}>
+            Add Dish
+          </Button>
         </div>
       </div>
 
-      {/* Add Dish Panel */}
-      {showAddDish && (
-        <div className="bg-olive/10 border border-olive/30 rounded-2xl p-4 space-y-3">
-          <h3 className="font-semibold text-bark text-sm">Add a Dish</h3>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <select value={selectedRecipeId} onChange={e => setSelectedRecipeId(e.target.value)}
-              className="px-3 py-2 rounded-xl border border-sage/30 text-sm bg-white focus:border-olive outline-none">
-              <option value="">Select recipe…</option>
-              {recipes.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
-            </select>
-            <select value={mealType} onChange={e => setMealType(e.target.value)}
-              className="px-3 py-2 rounded-xl border border-sage/30 text-sm bg-white focus:border-olive outline-none">
-              {mealTypes.map(m => <option key={m} value={m}>{m}</option>)}
-            </select>
-            <input type="date" value={plannedDate} onChange={e => setPlannedDate(e.target.value)}
-              className="px-3 py-2 rounded-xl border border-sage/30 text-sm bg-white focus:border-olive outline-none"
-            />
-          </div>
-          <div className="flex gap-2">
-            <button onClick={() => setShowAddDish(false)}
-              className="px-4 py-2 rounded-xl border border-sage/30 text-sage text-sm hover:bg-sage/10 transition-colors">Cancel</button>
-            <button onClick={handleAddDish} disabled={!selectedRecipeId || adding}
-              className="px-4 py-2 rounded-xl bg-sage text-white text-sm hover:bg-bark transition-colors disabled:opacity-60 flex items-center gap-2">
-              {adding && <Loader2 size={14} className="animate-spin" />} Add to Plan
-            </button>
-          </div>
-        </div>
-      )}
+      {/* Add dish inline panel */}
+      <AnimatePresence>
+        {showAdd && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
+            className="card p-4 space-y-3 border-[rgba(138,144,112,0.25)]"
+          >
+            <h3 className="text-sm font-bold text-[var(--color-dark)]">Add a Dish</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <select value={recipeId} onChange={(e) => setRecipeId(e.target.value)}
+                className="input py-2.5 px-4 text-sm bg-white">
+                <option value="">Select recipe…</option>
+                {recipes.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+              </select>
+              <select value={mealType} onChange={(e) => setMealType(e.target.value)}
+                className="input py-2.5 px-4 text-sm bg-white">
+                {['BREAKFAST', 'LUNCH', 'DINNER', 'SNACK'].map((m) => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+              </select>
+              <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="input" />
+            </div>
+            <div className="flex gap-2">
+              <Button variant="secondary" size="sm" onClick={() => setShowAdd(false)}>Cancel</Button>
+              <Button variant="primary" size="sm" loading={adding} disabled={!recipeId} onClick={handleAddDish}>
+                Add to Plan
+              </Button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-      {/* Dishes by Date */}
+      {/* Dishes by date */}
       {Object.keys(byDate).length === 0 ? (
-        <div className="text-center py-16 bg-white rounded-2xl border border-sage/20">
-          <Utensils size={40} className="mx-auto text-olive mb-3" />
-          <p className="text-bark font-semibold mb-1">No dishes planned yet</p>
-          <p className="text-sage text-sm">Click "Add Dish" to start filling this meal plan.</p>
+        <div className="card">
+          <EmptyState
+            icon={Utensils}
+            title="No dishes planned yet"
+            description='Click "Add Dish" to start filling this meal plan.'
+            action={{ label: 'Add Dish', icon: Plus, onClick: () => setShowAdd(true) }}
+          />
         </div>
       ) : (
         Object.entries(byDate).sort(([a], [b]) => a.localeCompare(b)).map(([date, dishes]) => (
-          <div key={date} className="bg-white rounded-2xl border border-sage/20 overflow-hidden">
-            <div className="px-5 py-3 bg-parchment border-b border-sage/10 flex items-center gap-2">
-              <CalendarDays size={15} className="text-sage" />
-              <span className="font-semibold text-bark text-sm">
-                {date === 'Unscheduled' ? 'Unscheduled' : new Date(date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}
+          <div key={date} className="card overflow-hidden">
+            <div className="px-5 py-3 bg-[var(--color-parchment)] border-b border-[rgba(138,144,112,0.10)] flex items-center gap-2">
+              <CalendarDays size={14} className="text-[var(--color-sage)]" />
+              <span className="font-bold text-sm text-[var(--color-dark)]">
+                {date === 'Unscheduled' ? 'Unscheduled' :
+                  new Date(date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })
+                }
               </span>
-              <span className="ml-auto text-xs text-sage">{dishes.length} dish{dishes.length !== 1 ? 'es' : ''}</span>
+              <span className="ml-auto text-xs text-[var(--color-sage)]">{dishes.length} dish{dishes.length !== 1 ? 'es' : ''}</span>
             </div>
-            <div className="divide-y divide-sage/10">
-              {dishes.map(dish => (
-                <div key={dish.id} className="flex items-center justify-between px-5 py-3 group hover:bg-parchment/50 transition-colors">
-                  <div className="flex items-center gap-3">
-                    <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
-                      dish.mealType === 'BREAKFAST' ? 'bg-amber-100 text-amber-700' :
-                      dish.mealType === 'LUNCH'     ? 'bg-blue-100 text-blue-700'   :
-                      dish.mealType === 'DINNER'    ? 'bg-purple-100 text-purple-700':
-                      'bg-sage/20 text-sage'
-                    }`}>{dish.mealType}</span>
-                    <span className="text-sm font-medium text-bark">{dish.recipe?.name || 'Unknown Recipe'}</span>
+            <div className="divide-y divide-[rgba(138,144,112,0.08)]">
+              {dishes.map((dish) => (
+                <div key={dish.id} className="flex items-center justify-between px-5 py-3.5 group hover:bg-[var(--color-parchment)] transition-colors">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full flex-shrink-0 ${MEAL_COLORS[dish.mealType] || MEAL_COLORS.SNACK}`}>
+                      {dish.mealType}
+                    </span>
+                    <span className="text-sm font-semibold text-[var(--color-dark)] truncate">{dish.recipe?.name || 'Unknown Recipe'}</span>
                     {dish.recipe?.prepTime && (
-                      <span className="text-xs text-sage flex items-center gap-1">
+                      <span className="text-xs text-[var(--color-sage)] flex items-center gap-1 flex-shrink-0">
                         <Clock size={11} /> {dish.recipe.prepTime}m
                       </span>
                     )}
                   </div>
                   <button
-                    onClick={() => handleDeleteDish(dish.id, dish.recipe?.name)}
-                    className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg text-sage hover:text-red-500 transition-all">
+                    onClick={() => { setDeleteDishId(dish.id); setDeleteDishName(dish.recipe?.name || 'this dish'); }}
+                    className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg text-[var(--color-sage)] hover:text-red-500 hover:bg-red-50 transition-all"
+                  >
                     <Trash2 size={14} />
                   </button>
                 </div>
@@ -309,25 +293,34 @@ const PlanDetail = ({ planId, recipes, onDishAdded, onDishDeleted }) => {
         ))
       )}
 
-      {showGrocery && (
-        <GroceryModal
-          mealPlanId={planId}
-          pantryId={null}
-          onClose={() => setShowGrocery(false)}
-        />
-      )}
+      {/* Grocery Modal */}
+      <GroceryModal isOpen={showGrocery} onClose={() => setShowGrocery(false)} mealPlanId={planId} />
+
+      {/* Delete dish confirm */}
+      <ConfirmDialog
+        isOpen={!!deleteDishId}
+        onClose={() => setDeleteDishId(null)}
+        onConfirm={handleDeleteDish}
+        loading={deleting}
+        title="Remove dish?"
+        description={`"${deleteDishName}" will be removed from this meal plan.`}
+        confirmLabel="Remove"
+      />
     </div>
   );
 };
 
-// ─── Main Meal Planner Page ────────────────────────────────────────────────────
+// ── Main Meal Planner Page ────────────────────────────────
 const MealPlanner = () => {
   const toast = useToast();
-  const [plans, setPlans] = useState([]);
-  const [recipes, setRecipes] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [selectedPlanId, setSelectedPlanId] = useState(null);
-  const [showCreate, setShowCreate] = useState(false);
+  const [plans, setPlans]               = useState([]);
+  const [recipes, setRecipes]           = useState([]);
+  const [loading, setLoading]           = useState(true);
+  const [selectedPlanId, setSelectedId] = useState(null);
+  const [showCreate, setShowCreate]     = useState(false);
+  const [deletePlanId, setDeletePlanId] = useState(null);
+  const [deletePlanName, setDeletePlanName] = useState('');
+  const [deleting, setDeleting]         = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -337,7 +330,7 @@ const MealPlanner = () => {
       setPlans(planList);
       setRecipes(recipeRes.data.data.recipes || []);
       if (planList.length > 0 && !selectedPlanId) {
-        setSelectedPlanId(planList[0].id);
+        setSelectedId(planList[0].id);
       }
     } catch {
       toast('Failed to load meal plans.', 'error');
@@ -348,120 +341,128 @@ const MealPlanner = () => {
 
   useEffect(() => { load(); }, [load]);
 
-  const handleDelete = async (planId, planName, e) => {
-    e.stopPropagation();
-    if (!window.confirm(`Delete "${planName}"? This cannot be undone.`)) return;
+  const handleDelete = async () => {
+    setDeleting(true);
     try {
-      await deleteMealPlan(planId);
-      setPlans(prev => prev.filter(p => p.id !== planId));
-      if (selectedPlanId === planId) setSelectedPlanId(null);
-      toast(`"${planName}" deleted.`, 'info');
-    } catch {
-      toast('Failed to delete plan.', 'error');
+      await deleteMealPlan(deletePlanId);
+      setPlans((prev) => prev.filter((p) => p.id !== deletePlanId));
+      if (selectedPlanId === deletePlanId) setSelectedId(null);
+      toast(`"${deletePlanName}" deleted.`, 'info');
+      setDeletePlanId(null);
+    } catch (err) {
+      toast(getErrorMessage(err), 'error');
+    } finally {
+      setDeleting(false);
     }
   };
 
   return (
-    <div className="h-screen flex overflow-hidden">
-      {/* ── Left Sidebar: Plan List ── */}
-      <div className="w-72 flex-shrink-0 border-r border-sage/20 bg-white flex flex-col">
-        <div className="p-5 border-b border-sage/20 flex items-center justify-between">
+    <div className="h-[calc(100vh-60px)] md:h-screen flex overflow-hidden">
+      {/* ── Left: Plan List ── */}
+      <div className="w-64 lg:w-72 flex-shrink-0 border-r border-[rgba(138,144,112,0.12)] bg-white flex flex-col">
+        <div className="p-5 border-b border-[rgba(138,144,112,0.10)] flex items-center justify-between">
           <div>
-            <h1 className="text-lg font-bold text-bark">Meal Plans</h1>
-            <p className="text-xs text-sage mt-0.5">{plans.length} plans</p>
+            <h1 className="text-base font-bold text-[var(--color-dark)]">Meal Plans</h1>
+            <p className="text-xs text-[var(--color-sage)] mt-0.5">{plans.length} plan{plans.length !== 1 ? 's' : ''}</p>
           </div>
-          <button onClick={() => setShowCreate(true)}
-            className="w-8 h-8 bg-sage hover:bg-bark text-white rounded-xl flex items-center justify-center transition-colors">
-            <Plus size={18} />
+          <button
+            onClick={() => setShowCreate(true)}
+            className="w-8 h-8 bg-[var(--color-sage)] hover:bg-[var(--color-bark)] text-white rounded-xl flex items-center justify-center transition-colors"
+          >
+            <Plus size={17} />
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
+        <div className="flex-1 overflow-y-auto p-3 space-y-1">
           {loading ? (
             Array.from({ length: 3 }).map((_, i) => (
-              <div key={i} className="h-20 bg-sage/10 rounded-xl animate-pulse" />
+              <div key={i} className="h-20 bg-[rgba(138,144,112,0.08)] rounded-xl animate-pulse" />
             ))
           ) : plans.length === 0 ? (
             <div className="text-center py-12 px-4">
-              <CalendarDays size={36} className="mx-auto text-olive mb-3" />
-              <p className="text-bark font-semibold text-sm mb-1">No meal plans yet</p>
-              <p className="text-sage text-xs">Create your first plan to get started.</p>
+              <CalendarDays size={32} className="mx-auto text-[var(--color-olive)] mb-3" />
+              <p className="font-bold text-sm text-[var(--color-dark)] mb-1">No plans yet</p>
+              <p className="text-xs text-[var(--color-sage)]">Create your first plan to get started.</p>
             </div>
-          ) : (
-            plans.map(plan => (
-              <div
-                key={plan.id}
-                onClick={() => setSelectedPlanId(plan.id)}
-                className={`group p-3.5 rounded-xl cursor-pointer transition-all border ${
-                  selectedPlanId === plan.id
-                    ? 'bg-bark text-white border-bark'
-                    : 'border-transparent hover:bg-parchment hover:border-sage/20'
-                }`}
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className={`font-semibold text-sm truncate ${selectedPlanId === plan.id ? 'text-white' : 'text-bark'}`}>
-                      {plan.name}
-                    </p>
-                    <p className={`text-xs mt-0.5 ${selectedPlanId === plan.id ? 'text-white/70' : 'text-sage'}`}>
-                      {new Date(plan.startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} –{' '}
-                      {new Date(plan.endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-1 flex-shrink-0">
-                    <StatusBadge status={plan.status} />
-                    <button
-                      onClick={(e) => handleDelete(plan.id, plan.name, e)}
-                      className={`p-1 rounded-lg opacity-0 group-hover:opacity-100 transition-all ${
-                        selectedPlanId === plan.id ? 'hover:bg-white/20 text-white/70' : 'hover:bg-red-50 text-sage hover:text-red-500'
-                      }`}>
-                      <Trash2 size={13} />
-                    </button>
-                  </div>
+          ) : plans.map((plan) => (
+            <div
+              key={plan.id}
+              onClick={() => setSelectedId(plan.id)}
+              className={`group p-3.5 rounded-xl cursor-pointer transition-all border ${
+                selectedPlanId === plan.id
+                  ? 'bg-[var(--color-dark)] border-[var(--color-dark)]'
+                  : 'border-transparent hover:bg-[var(--color-parchment)] hover:border-[rgba(138,144,112,0.2)]'
+              }`}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className={`font-semibold text-sm truncate ${selectedPlanId === plan.id ? 'text-white' : 'text-[var(--color-dark)]'}`}>
+                    {plan.name}
+                  </p>
+                  <p className={`text-xs mt-0.5 ${selectedPlanId === plan.id ? 'text-white/60' : 'text-[var(--color-sage)]'}`}>
+                    {new Date(plan.startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} –{' '}
+                    {new Date(plan.endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                  </p>
+                </div>
+                <div className="flex items-center gap-1 flex-shrink-0">
+                  <StatusBadge status={plan.status} />
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setDeletePlanId(plan.id); setDeletePlanName(plan.name); }}
+                    className={`p-1 rounded-lg opacity-0 group-hover:opacity-100 transition-all ${
+                      selectedPlanId === plan.id ? 'hover:bg-white/20 text-white/60' : 'hover:bg-red-50 text-[var(--color-sage)] hover:text-red-500'
+                    }`}
+                  >
+                    <Trash2 size={12} />
+                  </button>
                 </div>
               </div>
-            ))
-          )}
+            </div>
+          ))}
         </div>
       </div>
 
-      {/* ── Right Panel: Plan Detail ── */}
-      <div className="flex-1 bg-parchment flex flex-col overflow-hidden">
+      {/* ── Right: Detail ── */}
+      <div className="flex-1 bg-[var(--color-parchment)] flex flex-col overflow-hidden">
         {selectedPlanId ? (
-          <PlanDetail
-            key={selectedPlanId}
-            planId={selectedPlanId}
-            recipes={recipes}
-            onDishAdded={() => {}}
-            onDishDeleted={() => {}}
-          />
+          <PlanDetail key={selectedPlanId} planId={selectedPlanId} recipes={recipes} />
         ) : (
-          <div className="flex-1 flex flex-col items-center justify-center gap-4 text-center px-8">
-            <div className="w-20 h-20 bg-olive/20 rounded-2xl flex items-center justify-center">
-              <CalendarDays size={36} className="text-bark" />
+          <div className="flex-1 flex flex-col items-center justify-center gap-5 text-center px-8">
+            <div className="w-20 h-20 rounded-3xl bg-[rgba(138,144,112,0.12)] flex items-center justify-center">
+              <CalendarDays size={36} className="text-[var(--color-sage)]" />
             </div>
             <div>
-              <h2 className="text-xl font-bold text-bark mb-2">Select a Meal Plan</h2>
-              <p className="text-sage text-sm max-w-xs">Choose a plan from the sidebar to view and manage your weekly meals, or create a new one.</p>
+              <h2 className="text-xl font-bold text-[var(--color-dark)] mb-2">Select a Meal Plan</h2>
+              <p className="text-sm text-[var(--color-sage)] max-w-xs leading-relaxed">
+                Choose a plan from the sidebar to view and manage your weekly meals.
+              </p>
             </div>
-            <button onClick={() => setShowCreate(true)}
-              className="flex items-center gap-2 px-5 py-3 bg-sage text-white rounded-xl hover:bg-bark transition-colors font-medium">
-              <Plus size={18} /> Create New Plan
-            </button>
+            <Button variant="primary" icon={Plus} onClick={() => setShowCreate(true)}>
+              Create New Plan
+            </Button>
           </div>
         )}
       </div>
 
       {/* Create Modal */}
-      {showCreate && (
-        <CreatePlanModal
-          onClose={() => setShowCreate(false)}
-          onCreated={(plan) => {
-            setPlans(prev => [plan, ...prev]);
-            setSelectedPlanId(plan.id);
-          }}
-        />
-      )}
+      <CreatePlanModal
+        isOpen={showCreate}
+        onClose={() => setShowCreate(false)}
+        onCreated={(plan) => {
+          setPlans((prev) => [plan, ...prev]);
+          setSelectedId(plan.id);
+        }}
+      />
+
+      {/* Delete Confirm */}
+      <ConfirmDialog
+        isOpen={!!deletePlanId}
+        onClose={() => setDeletePlanId(null)}
+        onConfirm={handleDelete}
+        loading={deleting}
+        title="Delete meal plan?"
+        description={`"${deletePlanName}" and all its dishes will be permanently deleted.`}
+        confirmLabel="Delete Plan"
+      />
     </div>
   );
 };
