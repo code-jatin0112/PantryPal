@@ -21,6 +21,7 @@ const CreateRecipe       = lazy(() => import('./pages/Recipes/CreateRecipe'));
 const EditRecipe         = lazy(() => import('./pages/Recipes/EditRecipe'));
 const CookingMode        = lazy(() => import('./pages/CookingMode/CookingMode'));
 const AIRecommendations  = lazy(() => import('./pages/AIRecommendations/AIRecommendations'));
+const AIChat             = lazy(() => import('./pages/AIChat/AIChat'));
 const ShoppingList       = lazy(() => import('./pages/ShoppingList'));
 const MealPlans          = lazy(() => import('./pages/MealPlans/MealPlans'));
 const MealPlanDetails    = lazy(() => import('./pages/MealPlans/MealPlanDetails'));
@@ -68,6 +69,7 @@ const AppLayout = () => {
             <Route path="/cooking/:recipeId"   element={<CookingMode />} />
             <Route path="/cooking"             element={<CookingMode />} />
             <Route path="/ai-recommendations"  element={<AIRecommendations />} />
+            <Route path="/ai-chat"             element={<AIChat />} />
             <Route path="/shopping-list"       element={<ShoppingList />} />
             <Route path="/meal-plans"          element={<MealPlans />} />
             <Route path="/meal-plans/new"      element={<CreateMealPlan />} />
