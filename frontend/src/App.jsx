@@ -7,23 +7,27 @@ import { FullPageSpinner } from './components/ui/Spinner';
 import DashboardLayout from './components/layout/DashboardLayout';
 
 // ── Lazy-loaded pages (code splitting) ───────────────────
-const Login          = lazy(() => import('./pages/Login'));
-const Register       = lazy(() => import('./pages/Register'));
-const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
-const NotFound       = lazy(() => import('./pages/NotFound'));
-const Dashboard      = lazy(() => import('./pages/Dashboard'));
-const Pantry         = lazy(() => import('./pages/Pantry'));
-const AddPantryItem  = lazy(() => import('./pages/Pantry/AddPantryItem'));
-const EditPantryItem = lazy(() => import('./pages/Pantry/EditPantryItem'));
-const Recipes        = lazy(() => import('./pages/Recipes'));
-const RecipeDetails  = lazy(() => import('./pages/Recipes/RecipeDetails'));
-const CreateRecipe   = lazy(() => import('./pages/Recipes/CreateRecipe'));
-const EditRecipe     = lazy(() => import('./pages/Recipes/EditRecipe'));
-const ShoppingList   = lazy(() => import('./pages/ShoppingList'));
-const MealPlanner    = lazy(() => import('./pages/MealPlanner'));
-const Assistant      = lazy(() => import('./pages/Assistant'));
-const Preferences    = lazy(() => import('./pages/Preferences'));
-const Profile        = lazy(() => import('./pages/Profile'));
+const Login           = lazy(() => import('./pages/Login'));
+const Register        = lazy(() => import('./pages/Register'));
+const ForgotPassword  = lazy(() => import('./pages/ForgotPassword'));
+const NotFound        = lazy(() => import('./pages/NotFound'));
+const Dashboard       = lazy(() => import('./pages/Dashboard'));
+const Pantry          = lazy(() => import('./pages/Pantry'));
+const AddPantryItem   = lazy(() => import('./pages/Pantry/AddPantryItem'));
+const EditPantryItem  = lazy(() => import('./pages/Pantry/EditPantryItem'));
+const Recipes         = lazy(() => import('./pages/Recipes'));
+const RecipeDetails   = lazy(() => import('./pages/Recipes/RecipeDetails'));
+const CreateRecipe    = lazy(() => import('./pages/Recipes/CreateRecipe'));
+const EditRecipe      = lazy(() => import('./pages/Recipes/EditRecipe'));
+const ShoppingList    = lazy(() => import('./pages/ShoppingList'));
+const MealPlans       = lazy(() => import('./pages/MealPlans/MealPlans'));
+const MealPlanDetails = lazy(() => import('./pages/MealPlans/MealPlanDetails'));
+const CreateMealPlan  = lazy(() => import('./pages/MealPlans/CreateMealPlan'));
+const EditMealPlan    = lazy(() => import('./pages/MealPlans/EditMealPlan'));
+const MealPlanner     = lazy(() => import('./pages/MealPlanner'));
+const Assistant       = lazy(() => import('./pages/Assistant'));
+const Preferences     = lazy(() => import('./pages/Preferences'));
+const Profile         = lazy(() => import('./pages/Profile'));
 
 // ── Page transition wrapper ───────────────────────────────
 const PageTransition = ({ children }) => {
@@ -51,20 +55,24 @@ const AppLayout = () => {
       <Suspense fallback={<FullPageSpinner label="Loading page…" />}>
         <PageTransition>
           <Routes>
-            <Route path="/"                 element={<Dashboard />} />
-            <Route path="/pantry"           element={<Pantry />} />
-            <Route path="/pantry/add"       element={<AddPantryItem />} />
-            <Route path="/pantry/:id/edit"  element={<EditPantryItem />} />
-            <Route path="/recipes"          element={<Recipes />} />
-            <Route path="/recipes/new"      element={<CreateRecipe />} />
-            <Route path="/recipes/:id"      element={<RecipeDetails />} />
-            <Route path="/recipes/:id/edit" element={<EditRecipe />} />
-            <Route path="/shopping-list"    element={<ShoppingList />} />
-            <Route path="/meal-planner"     element={<MealPlanner />} />
-            <Route path="/assistant"        element={<Assistant />} />
-            <Route path="/preferences"      element={<Preferences />} />
-            <Route path="/profile"          element={<Profile />} />
-            <Route path="*"                 element={<NotFound />} />
+            <Route path="/"                   element={<Dashboard />} />
+            <Route path="/pantry"             element={<Pantry />} />
+            <Route path="/pantry/add"         element={<AddPantryItem />} />
+            <Route path="/pantry/:id/edit"    element={<EditPantryItem />} />
+            <Route path="/recipes"            element={<Recipes />} />
+            <Route path="/recipes/new"        element={<CreateRecipe />} />
+            <Route path="/recipes/:id"        element={<RecipeDetails />} />
+            <Route path="/recipes/:id/edit"   element={<EditRecipe />} />
+            <Route path="/shopping-list"      element={<ShoppingList />} />
+            <Route path="/meal-plans"         element={<MealPlans />} />
+            <Route path="/meal-plans/new"     element={<CreateMealPlan />} />
+            <Route path="/meal-plans/:id"     element={<MealPlanDetails />} />
+            <Route path="/meal-plans/:id/edit" element={<EditMealPlan />} />
+            <Route path="/meal-planner"       element={<MealPlanner />} />
+            <Route path="/assistant"          element={<Assistant />} />
+            <Route path="/preferences"        element={<Preferences />} />
+            <Route path="/profile"            element={<Profile />} />
+            <Route path="*"                   element={<NotFound />} />
           </Routes>
         </PageTransition>
       </Suspense>
