@@ -6,7 +6,6 @@ import NotificationFilters from '../../components/notifications/NotificationFilt
 import NotificationList from '../../components/notifications/NotificationList';
 import NotificationEmptyState from '../../components/notifications/NotificationEmptyState';
 import NotificationSkeleton from '../../components/notifications/NotificationSkeleton';
-import { INITIAL_NOTIFICATIONS } from '../../components/notifications/notificationsData';
 import { getNotifications, saveNotifications } from '../../services/notificationService';
 import { usePantry } from '../../hooks/usePantry';
 import Button from '../../components/ui/Button';
@@ -18,11 +17,11 @@ const Notifications = () => {
   const toast = useToast();
   const { activePantry } = usePantry();
 
-  const [notifications, setNotifications] = useState(INITIAL_NOTIFICATIONS);
+  const [notifications, setNotifications] = useState([]);
   const [activeTab, setActiveTab] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   // Load from notification service (aggregating backend expiry & low stock alerts)
   const fetchNotifications = useCallback(async () => {

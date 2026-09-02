@@ -65,9 +65,20 @@ export const searchGlobal = async (query = '', filter = 'all', pantryId = null) 
       api.get(SHOPPING.LIST).catch(() => ({ data: { data: [] } })),
     ];
 
-    if (pantryId) {
+    let targetPantryId = pantryId;
+    if (!targetPantryId) {
+      try {
+        const pantriesRes = await api.get(PANTRY.LIST);
+        const pantries = pantriesRes.data?.data?.pantries || pantriesRes.data?.data || [];
+        if (pantries.length > 0) {
+          targetPantryId = pantries[0].id;
+        }
+      } catch {}
+    }
+
+    if (targetPantryId) {
       promises.push(
-        api.get(PANTRY.ITEMS(pantryId)).catch(() => ({ data: { data: [] } }))
+        api.get(PANTRY.ITEMS(targetPantryId)).catch(() => ({ data: { data: [] } }))
       );
     }
 

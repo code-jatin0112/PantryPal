@@ -52,10 +52,10 @@ const Dashboard = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [summary, setSummary] = useState({
-    pantryItems: 38,
-    recipes: 24,
-    shoppingList: 8,
-    mealPlans: 3,
+    pantryItems: 0,
+    recipes: 0,
+    shoppingList: 0,
+    mealPlans: 0,
   });
   const [pantryItems, setPantryItems] = useState([]);
   const [expiringItems, setExpiringItems] = useState([]);
