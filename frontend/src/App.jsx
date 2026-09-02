@@ -13,6 +13,8 @@ const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
 const NotFound       = lazy(() => import('./pages/NotFound'));
 const Dashboard      = lazy(() => import('./pages/Dashboard'));
 const Pantry         = lazy(() => import('./pages/Pantry'));
+const AddPantryItem  = lazy(() => import('./pages/Pantry/AddPantryItem'));
+const EditPantryItem = lazy(() => import('./pages/Pantry/EditPantryItem'));
 const Recipes        = lazy(() => import('./pages/Recipes'));
 const ShoppingList   = lazy(() => import('./pages/ShoppingList'));
 const MealPlanner    = lazy(() => import('./pages/MealPlanner'));
@@ -46,15 +48,17 @@ const AppLayout = () => {
       <Suspense fallback={<FullPageSpinner label="Loading page…" />}>
         <PageTransition>
           <Routes>
-            <Route path="/"              element={<Dashboard />} />
-            <Route path="/pantry"        element={<Pantry />} />
-            <Route path="/recipes"       element={<Recipes />} />
-            <Route path="/shopping-list" element={<ShoppingList />} />
-            <Route path="/meal-planner"  element={<MealPlanner />} />
-            <Route path="/assistant"     element={<Assistant />} />
-            <Route path="/preferences"   element={<Preferences />} />
-            <Route path="/profile"       element={<Profile />} />
-            <Route path="*"              element={<NotFound />} />
+            <Route path="/"                 element={<Dashboard />} />
+            <Route path="/pantry"           element={<Pantry />} />
+            <Route path="/pantry/add"       element={<AddPantryItem />} />
+            <Route path="/pantry/:id/edit"  element={<EditPantryItem />} />
+            <Route path="/recipes"          element={<Recipes />} />
+            <Route path="/shopping-list"    element={<ShoppingList />} />
+            <Route path="/meal-planner"     element={<MealPlanner />} />
+            <Route path="/assistant"        element={<Assistant />} />
+            <Route path="/preferences"      element={<Preferences />} />
+            <Route path="/profile"          element={<Profile />} />
+            <Route path="*"                 element={<NotFound />} />
           </Routes>
         </PageTransition>
       </Suspense>
