@@ -232,7 +232,7 @@ export const getShoppingPreview = async () => {
  */
 export const getAIRecommendations = async () => {
   try {
-    const res = await api.get(AI_RECOMMENDATIONS.GENERATE, { params: { limit: 3 } });
+    const res = await api.post(AI.RECOMMENDATIONS, { limit: 3 });
     const recs = res.data?.data?.recommendations || res.data?.data || [];
     const items = recs.slice(0, 3).map((r) => ({
       id: r.id || r.recipeId,
