@@ -10,8 +10,10 @@ node_modules/
 dist/
 build/
 
-# Test coverage
+# Test coverage & artifacts
 coverage/
+test-results/
+playwright-report/
 
 # Logs
 *.log
