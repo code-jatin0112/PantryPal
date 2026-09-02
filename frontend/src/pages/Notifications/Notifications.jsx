@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { motion } from 'framer-motion';
 
 import NotificationHeader from '../../components/notifications/NotificationHeader';
@@ -7,36 +7,41 @@ import NotificationList from '../../components/notifications/NotificationList';
 import NotificationEmptyState from '../../components/notifications/NotificationEmptyState';
 import NotificationSkeleton from '../../components/notifications/NotificationSkeleton';
 import { INITIAL_NOTIFICATIONS } from '../../components/notifications/notificationsData';
+import { getNotifications, saveNotifications } from '../../services/notificationService';
+import { usePantry } from '../../hooks/usePantry';
 import Button from '../../components/ui/Button';
 import { useToast } from '../../context/ToastContext';
 
-const STORAGE_NOTIFICATIONS_KEY = 'pantrypal_notifications';
 const PAGE_SIZE = 8;
 
 const Notifications = () => {
   const toast = useToast();
+  const { activePantry } = usePantry();
 
-  const [notifications, setNotifications] = useState(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_NOTIFICATIONS_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    } catch {}
-    return INITIAL_NOTIFICATIONS;
-  });
-
+  const [notifications, setNotifications] = useState(INITIAL_NOTIFICATIONS);
   const [activeTab, setActiveTab] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [loading, setLoading] = useState(false);
 
-  // Persist to localStorage
-  useEffect(() => {
+  // Load from notification service (aggregating backend expiry & low stock alerts)
+  const fetchNotifications = useCallback(async () => {
+    setLoading(true);
     try {
-      localStorage.setItem(STORAGE_NOTIFICATIONS_KEY, JSON.stringify(notifications));
-    } catch {}
+      const data = await getNotifications(activePantry?.id);
+      setNotifications(data);
+    } finally {
+      setLoading(false);
+    }
+  }, [activePantry?.id]);
+
+  useEffect(() => {
+    fetchNotifications();
+  }, [fetchNotifications]);
+
+  // Persist local read state
+  useEffect(() => {
+    saveNotifications(notifications);
   }, [notifications]);
 
   // Unread count

@@ -28,6 +28,8 @@ import Button from '../../components/ui/Button';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 
+import { getUserPreferences, updateUserPreferences } from '../../services/preferenceService';
+
 const STORAGE_SETTINGS_KEY = 'pantrypal_user_settings';
 
 const DEFAULT_SETTINGS = {
@@ -92,9 +94,34 @@ const Settings = () => {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [dislikedInput, setDislikedInput] = useState('');
 
-  // Persist locally
-  const handleSave = () => {
+  // Load preferences from backend on mount
+  useEffect(() => {
+    const loadBackendPreferences = async () => {
+      try {
+        const backendPrefs = await getUserPreferences();
+        if (backendPrefs) {
+          setSettings((prev) => ({
+            ...prev,
+            ...backendPrefs,
+            diets: backendPrefs.dietaryRequirements || backendPrefs.diets || prev.diets,
+            allergies: backendPrefs.allergies || prev.allergies,
+            dislikedIngredients: backendPrefs.dislikedIngredients || prev.dislikedIngredients,
+          }));
+        }
+      } catch {}
+    };
+    loadBackendPreferences();
+  }, []);
+
+  // Persist to backend and locally
+  const handleSave = async () => {
     try {
+      await updateUserPreferences({
+        ...settings,
+        dietaryRequirements: settings.diets,
+        allergies: settings.allergies,
+        dislikedIngredients: settings.dislikedIngredients,
+      });
       localStorage.setItem(STORAGE_SETTINGS_KEY, JSON.stringify(settings));
       toast('Kitchen settings saved successfully! ⚙️', 'success');
     } catch {
