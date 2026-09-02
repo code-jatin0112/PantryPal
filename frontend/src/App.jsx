@@ -7,28 +7,29 @@ import { FullPageSpinner } from './components/ui/Spinner';
 import DashboardLayout from './components/layout/DashboardLayout';
 
 // ── Lazy-loaded pages (code splitting) ───────────────────
-const Login           = lazy(() => import('./pages/Login'));
-const Register        = lazy(() => import('./pages/Register'));
-const ForgotPassword  = lazy(() => import('./pages/ForgotPassword'));
-const NotFound        = lazy(() => import('./pages/NotFound'));
-const Dashboard       = lazy(() => import('./pages/Dashboard'));
-const Pantry          = lazy(() => import('./pages/Pantry'));
-const AddPantryItem   = lazy(() => import('./pages/Pantry/AddPantryItem'));
-const EditPantryItem  = lazy(() => import('./pages/Pantry/EditPantryItem'));
-const Recipes         = lazy(() => import('./pages/Recipes'));
-const RecipeDetails   = lazy(() => import('./pages/Recipes/RecipeDetails'));
-const CreateRecipe    = lazy(() => import('./pages/Recipes/CreateRecipe'));
-const EditRecipe      = lazy(() => import('./pages/Recipes/EditRecipe'));
-const CookingMode     = lazy(() => import('./pages/CookingMode/CookingMode'));
-const ShoppingList    = lazy(() => import('./pages/ShoppingList'));
-const MealPlans       = lazy(() => import('./pages/MealPlans/MealPlans'));
-const MealPlanDetails = lazy(() => import('./pages/MealPlans/MealPlanDetails'));
-const CreateMealPlan  = lazy(() => import('./pages/MealPlans/CreateMealPlan'));
-const EditMealPlan    = lazy(() => import('./pages/MealPlans/EditMealPlan'));
-const MealPlanner     = lazy(() => import('./pages/MealPlanner'));
-const Assistant       = lazy(() => import('./pages/Assistant'));
-const Preferences     = lazy(() => import('./pages/Preferences'));
-const Profile         = lazy(() => import('./pages/Profile'));
+const Login              = lazy(() => import('./pages/Login'));
+const Register           = lazy(() => import('./pages/Register'));
+const ForgotPassword     = lazy(() => import('./pages/ForgotPassword'));
+const NotFound           = lazy(() => import('./pages/NotFound'));
+const Dashboard          = lazy(() => import('./pages/Dashboard'));
+const Pantry             = lazy(() => import('./pages/Pantry'));
+const AddPantryItem      = lazy(() => import('./pages/Pantry/AddPantryItem'));
+const EditPantryItem     = lazy(() => import('./pages/Pantry/EditPantryItem'));
+const Recipes            = lazy(() => import('./pages/Recipes'));
+const RecipeDetails      = lazy(() => import('./pages/Recipes/RecipeDetails'));
+const CreateRecipe       = lazy(() => import('./pages/Recipes/CreateRecipe'));
+const EditRecipe         = lazy(() => import('./pages/Recipes/EditRecipe'));
+const CookingMode        = lazy(() => import('./pages/CookingMode/CookingMode'));
+const AIRecommendations  = lazy(() => import('./pages/AIRecommendations/AIRecommendations'));
+const ShoppingList       = lazy(() => import('./pages/ShoppingList'));
+const MealPlans          = lazy(() => import('./pages/MealPlans/MealPlans'));
+const MealPlanDetails    = lazy(() => import('./pages/MealPlans/MealPlanDetails'));
+const CreateMealPlan     = lazy(() => import('./pages/MealPlans/CreateMealPlan'));
+const EditMealPlan       = lazy(() => import('./pages/MealPlans/EditMealPlan'));
+const MealPlanner        = lazy(() => import('./pages/MealPlanner'));
+const Assistant          = lazy(() => import('./pages/Assistant'));
+const Preferences        = lazy(() => import('./pages/Preferences'));
+const Profile            = lazy(() => import('./pages/Profile'));
 
 // ── Page transition wrapper ───────────────────────────────
 const PageTransition = ({ children }) => {
@@ -66,6 +67,7 @@ const AppLayout = () => {
             <Route path="/recipes/:id/edit"    element={<EditRecipe />} />
             <Route path="/cooking/:recipeId"   element={<CookingMode />} />
             <Route path="/cooking"             element={<CookingMode />} />
+            <Route path="/ai-recommendations"  element={<AIRecommendations />} />
             <Route path="/shopping-list"       element={<ShoppingList />} />
             <Route path="/meal-plans"          element={<MealPlans />} />
             <Route path="/meal-plans/new"      element={<CreateMealPlan />} />
