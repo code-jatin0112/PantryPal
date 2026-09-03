@@ -45,8 +45,24 @@ const AIRecommendations = () => {
     setLoading(true);
     setError(null);
     try {
+      let targetPantryId = activePantry?.id;
+      if (!targetPantryId) {
+        try {
+          const pantriesRes = await api.get('/pantries');
+          const pantries = pantriesRes.data?.data?.pantries || pantriesRes.data?.data || [];
+          if (pantries.length > 0) {
+            targetPantryId = pantries[0].id;
+          }
+        } catch {}
+      }
+
+      if (!targetPantryId) {
+        setRecommendations([]);
+        return;
+      }
+
       const payload = {
-        pantryId: activePantry?.id || '00000000-0000-0000-0000-000000000000',
+        pantryId: targetPantryId,
         dietaryRequirements: diet.length > 0 ? diet : undefined,
         cuisine: cuisine !== 'ALL' ? cuisine : undefined,
         mealType: mealType !== 'All' ? mealType : undefined,
@@ -56,10 +72,16 @@ const AIRecommendations = () => {
 
       const result = await getAIRecommendations(payload);
       setRecommendations(result || []);
-      toast('Generated fresh AI recipe recommendations! ✨', 'success');
+      if (result && result.length > 0) {
+        toast('Generated fresh AI recipe recommendations! ✨', 'success');
+      }
     } catch (err) {
-      setError(getErrorMessage(err) || 'Failed to generate recommendations.');
-      toast('Error generating recommendations. Click retry.', 'error');
+      const code = err.response?.data?.error?.code;
+      if (code === 'PANTRY_HAS_NO_ITEMS' || code === 'PANTRY_NOT_FOUND') {
+        setRecommendations([]);
+      } else {
+        setError(getErrorMessage(err) || 'Failed to generate recommendations.');
+      }
     } finally {
       setLoading(false);
     }

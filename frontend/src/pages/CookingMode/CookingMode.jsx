@@ -277,12 +277,15 @@ const CookingMode = () => {
         <div className="space-y-1.5">
           <h2 className="text-xl font-bold text-[var(--color-dark)]">No recipe selected</h2>
           <p className="text-xs text-[var(--color-sage)]">
-            Select a recipe from your cookbook or create a new recipe to start interactive cooking mode.
+            Select a recipe from your personal cookbook or create a new recipe to launch the cooking studio.
           </p>
         </div>
-        <div className="flex items-center justify-center gap-3 pt-2">
+        <div className="flex items-center justify-center gap-2.5 pt-2 flex-wrap">
           <Button variant="secondary" size="md" icon={ArrowLeft} onClick={() => navigate('/recipes')}>
             Cookbook
+          </Button>
+          <Button variant="secondary" size="md" onClick={() => navigate('/ai-recommendations')}>
+            AI Recipes
           </Button>
           <Button variant="primary" size="md" icon={Plus} onClick={() => navigate('/recipes/new')}>
             Create Recipe
