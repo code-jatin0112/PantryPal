@@ -6,15 +6,7 @@ import Button from '../ui/Button';
 const AIRecommendationCard = ({ recommendations = [] }) => {
   const navigate = useNavigate();
 
-  const defaultRecipes = [
-    'Vegetable Pulao',
-    'Tomato Soup',
-    'Fried Rice',
-  ];
-
-  const items = recommendations.length > 0
-    ? recommendations.map((r) => (typeof r === 'string' ? r : r.name))
-    : defaultRecipes;
+  const items = recommendations.map((r) => (typeof r === 'string' ? r : r.name || r.title)).filter(Boolean);
 
   return (
     <div className="bg-white rounded-2xl border border-[rgba(138,144,112,0.22)] p-5 sm:p-6 shadow-[0_1px_3px_rgba(39,42,31,0.04)] flex flex-col justify-between relative overflow-hidden group hover:border-[var(--color-sage)] transition-all">
@@ -39,22 +31,31 @@ const AIRecommendationCard = ({ recommendations = [] }) => {
 
         {/* Content Body */}
         <div className="my-4">
-          <p className="text-xs font-semibold text-[var(--color-bark)] mb-2.5">
-            You can cook today:
-          </p>
-          <ul className="space-y-2">
-            {items.map((recipe, index) => (
-              <li
-                key={index}
-                className="flex items-center gap-2.5 text-xs font-medium text-[var(--color-dark)] bg-[var(--color-parchment)] p-2 rounded-xl"
-              >
-                <div className="w-5 h-5 rounded-lg bg-white border border-[rgba(138,144,112,0.2)] flex items-center justify-center text-[var(--color-sage)] flex-shrink-0">
-                  <ChefHat size={11} />
-                </div>
-                <span className="truncate font-semibold">{recipe}</span>
-              </li>
-            ))}
-          </ul>
+          {items.length === 0 ? (
+            <div className="py-6 text-center text-xs text-[var(--color-sage)] space-y-1">
+              <p className="font-semibold text-[var(--color-dark)]">No suggestions yet</p>
+              <p>Add ingredients to your pantry to unlock personalized recipes.</p>
+            </div>
+          ) : (
+            <>
+              <p className="text-xs font-semibold text-[var(--color-bark)] mb-2.5">
+                You can cook today:
+              </p>
+              <ul className="space-y-2">
+                {items.map((recipe, index) => (
+                  <li
+                    key={index}
+                    className="flex items-center gap-2.5 text-xs font-medium text-[var(--color-dark)] bg-[var(--color-parchment)] p-2 rounded-xl"
+                  >
+                    <div className="w-5 h-5 rounded-lg bg-white border border-[rgba(138,144,112,0.2)] flex items-center justify-center text-[var(--color-sage)] flex-shrink-0">
+                      <ChefHat size={11} />
+                    </div>
+                    <span className="truncate font-semibold">{recipe}</span>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
         </div>
       </div>
 
@@ -65,7 +66,7 @@ const AIRecommendationCard = ({ recommendations = [] }) => {
           size="sm"
           fullWidth
           iconRight={ArrowRight}
-          onClick={() => navigate('/recipes')}
+          onClick={() => navigate('/ai-recommendations')}
         >
           View Recommendations
         </Button>

@@ -22,6 +22,7 @@ import { useToast } from '../../context/ToastContext';
 import { getRecipes } from '../../services/recipeService';
 import { getMealPlans } from '../../services/mealPlanService';
 import { getShoppingList } from '../../services/shoppingListService';
+import { getPantries, getPantryItems } from '../../services/pantryService';
 import { getCurrentUserProfile } from '../../services/preferenceService';
 
 const STORAGE_PROFILE_KEY = 'pantrypal_user_profile';
@@ -39,7 +40,7 @@ const Profile = () => {
     return {
       name: user?.name || 'Chef Gourmet',
       email: user?.email || 'chef@pantrypal.app',
-      bio: 'Home cook focused on zero-waste cooking, fresh Mediterranean meals, and high-protein nutrition.',
+      bio: user?.bio || '',
       photoUrl: null,
     };
   });
@@ -59,20 +60,35 @@ const Profile = () => {
   useEffect(() => {
     const fetchStats = async () => {
       try {
-        const [recipesRes, mealPlansRes, shoppingRes] = await Promise.allSettled([
+        const [pantriesRes, recipesRes, mealPlansRes, shoppingRes] = await Promise.allSettled([
+          getPantries(),
           getRecipes(),
           getMealPlans(),
           getShoppingList(),
         ]);
 
-        const recipes = recipesRes.status === 'fulfilled' ? recipesRes.value.data.data?.recipes || [] : [];
-        const mealPlans = mealPlansRes.status === 'fulfilled' ? mealPlansRes.value.data.data?.mealPlans || [] : [];
-        const shopping = shoppingRes.status === 'fulfilled' ? shoppingRes.value.data.data?.items || [] : [];
+        let livePantryCount = 0;
+        if (pantriesRes.status === 'fulfilled') {
+          const pantries = pantriesRes.value.data?.data?.pantries || pantriesRes.value.data?.data || [];
+          if (pantries.length > 0) {
+            try {
+              const itemsRes = await getPantryItems(pantries[0].id);
+              const items = itemsRes.data?.data?.items || itemsRes.data?.data || [];
+              livePantryCount = items.length;
+            } catch {
+              livePantryCount = 0;
+            }
+          }
+        }
+
+        const recipes = recipesRes.status === 'fulfilled' ? recipesRes.value.data?.data?.recipes || recipesRes.value.data?.data || [] : [];
+        const mealPlans = mealPlansRes.status === 'fulfilled' ? mealPlansRes.value.data?.data?.mealPlans || mealPlansRes.value.data?.data || [] : [];
+        const shopping = shoppingRes.status === 'fulfilled' ? shoppingRes.value.data?.data?.items || shoppingRes.value.data?.data || [] : [];
         const favorites = recipes.filter((r) => r.isFavorite);
 
         setStats({
           recipesCount: recipes.length,
-          pantryCount: 16,
+          pantryCount: livePantryCount,
           shoppingCount: shopping.length,
           mealPlansCount: mealPlans.length,
           favoritesCount: favorites.length,

@@ -27,6 +27,10 @@ export const getRecipes = async ({ userId }) => {
     where: {
       userId,
     },
+    include: {
+      ingredients: true,
+      nutrition: true,
+    },
     orderBy: {
       createdAt: "desc",
     },
@@ -38,6 +42,10 @@ export const getRecipeById = async ({ userId, recipeId }) => {
     where: {
       id: recipeId,
       userId,
+    },
+    include: {
+      ingredients: true,
+      nutrition: true,
     },
   });
 };

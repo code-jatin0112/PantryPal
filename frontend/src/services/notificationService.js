@@ -1,28 +1,38 @@
 import api from './api';
-import { PANTRY, MEAL_PLANS } from '../constants/api';
-import { INITIAL_NOTIFICATIONS } from '../components/notifications/notificationsData';
+import { PANTRY } from '../constants/api';
 
 const STORAGE_NOTIFICATIONS_KEY = 'pantrypal_notifications';
 
 /**
- * Fetch and aggregate live notifications from backend pantry & meal planning alerts
+ * Fetch and aggregate live notifications from backend pantry alerts
  */
 export const getNotifications = async (pantryId) => {
   const localNotifications = (() => {
     try {
       const saved = localStorage.getItem(STORAGE_NOTIFICATIONS_KEY);
-      return saved ? JSON.parse(saved) : INITIAL_NOTIFICATIONS;
+      return saved ? JSON.parse(saved) : [];
     } catch {
-      return INITIAL_NOTIFICATIONS;
+      return [];
     }
   })();
 
-  if (!pantryId) return localNotifications;
-
   try {
+    let targetPantryId = pantryId;
+    if (!targetPantryId) {
+      const pantriesRes = await api.get(PANTRY.LIST);
+      const pantries = pantriesRes.data?.data?.pantries || pantriesRes.data?.data || [];
+      if (pantries.length > 0) {
+        targetPantryId = pantries[0].id;
+      }
+    }
+
+    if (!targetPantryId) {
+      return localNotifications;
+    }
+
     const [expiringRes, lowStockRes] = await Promise.allSettled([
-      api.get(PANTRY.EXPIRING(pantryId, 5)),
-      api.get(PANTRY.LOW_STOCK(pantryId)),
+      api.get(PANTRY.EXPIRING(targetPantryId, 5)),
+      api.get(PANTRY.LOW_STOCK(targetPantryId)),
     ]);
 
     const liveNotifications = [...localNotifications];
@@ -71,7 +81,6 @@ export const getNotifications = async (pantryId) => {
 
     return liveNotifications;
   } catch (err) {
-    console.warn('Backend notification aggregation fallback.', err);
     return localNotifications;
   }
 };

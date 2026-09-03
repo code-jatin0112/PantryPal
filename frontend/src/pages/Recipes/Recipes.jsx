@@ -66,11 +66,13 @@ const Recipes = () => {
 
       const favList =
         favsRes.status === 'fulfilled'
-          ? favsRes.value.data.data?.recipes || favsRes.value.data.data || []
+          ? favsRes.value.data?.data?.favorites || favsRes.value.data?.data?.recipes || favsRes.value.data?.data || []
           : [];
 
+      const favIds = favList.map((r) => r.recipeId || r.recipe?.id || r.id).filter(Boolean);
+
       setRecipes(recipeList);
-      setFavorites(new Set(favList.map((r) => r.id)));
+      setFavorites(new Set(favIds));
     } catch (err) {
       toast(getErrorMessage(err) || 'Failed to load recipes.', 'error');
     } finally {
@@ -158,12 +160,12 @@ const Recipes = () => {
     const validCookTimes = recipes.map((r) => (r.prepTime || 0) + (r.cookTime || 0)).filter((t) => t > 0);
     const avgCookTime = validCookTimes.length > 0
       ? Math.round(validCookTimes.reduce((a, b) => a + b, 0) / validCookTimes.length)
-      : 25;
+      : 0;
 
     const validCalories = recipes.map((r) => r.nutrition?.calories).filter((c) => c && c > 0);
     const avgCalories = validCalories.length > 0
       ? Math.round(validCalories.reduce((a, b) => a + b, 0) / validCalories.length)
-      : 480;
+      : 0;
 
     return { total, favCount, avgCookTime, avgCalories };
   }, [recipes, favorites]);

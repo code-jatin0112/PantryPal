@@ -26,9 +26,9 @@ const TIME_OPTIONS = [
 
 const BUDGET_OPTIONS = [
   { value: 'ALL',    label: 'All Budgets' },
-  { value: 'low',    label: '$ Low Budget' },
-  { value: 'medium', label: '$$ Medium' },
-  { value: 'high',   label: '$$$ Gourmet' },
+  { value: 'low',    label: '₹ Low Budget' },
+  { value: 'medium', label: '₹₹ Medium' },
+  { value: 'high',   label: '₹₹₹ Gourmet' },
 ];
 
 const RecommendationFilters = ({

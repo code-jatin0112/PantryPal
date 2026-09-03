@@ -15,7 +15,7 @@ import {
   RotateCcw,
   Check,
   Utensils,
-  DollarSign,
+  IndianRupee,
   HeartPulse,
 } from 'lucide-react';
 
@@ -558,9 +558,9 @@ const Settings = () => {
                         onChange={(e) => updateSetting('budgetPriority', e.target.value)}
                         className="input text-xs"
                       >
-                        <option value="low">$ Low Budget (Thrifty Pantry Staples)</option>
-                        <option value="medium">$$ Balanced Cost</option>
-                        <option value="high">$$$ Gourmet / Premium Ingredients</option>
+                        <option value="low">₹ Low Budget (Thrifty Pantry Staples)</option>
+                        <option value="medium">₹₹ Balanced Cost</option>
+                        <option value="high">₹₹₹ Gourmet / Premium Ingredients</option>
                       </select>
                     </div>
 
