@@ -15,7 +15,7 @@ export const generateAccessToken = (userId) => {
     },
     getJwtSecret(),
     {
-      expiresIn: process.env.JWT_EXPIRES_IN || "15m",
+      expiresIn: process.env.JWT_EXPIRES_IN || "7d",
     }
   );
 };
