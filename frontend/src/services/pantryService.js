@@ -1,18 +1,20 @@
 import api from './api';
+import { PANTRY } from '../constants/api';
 
-// --- Pantry CRUD ---
-export const getPantries = () => api.get('/pantries');
-export const createPantry = (data) => api.post('/pantries', data);
-export const deletePantry = (pantryId) => api.delete(`/pantries/${pantryId}`);
+// ── Pantry Containers CRUD ─────────────────────────────────
+export const getPantries = () => api.get(PANTRY.LIST);
+export const createPantry = (data) => api.post(PANTRY.CREATE, data);
+export const deletePantry = (pantryId) => api.delete(PANTRY.DELETE(pantryId));
 
-// --- Pantry Items CRUD ---
-export const getPantryItems = (pantryId) => api.get(`/pantries/${pantryId}/items`);
-export const createPantryItem = (pantryId, data) => api.post(`/pantries/${pantryId}/items`, data);
-export const updatePantryItem = (pantryId, itemId, data) => api.patch(`/pantries/${pantryId}/items/${itemId}`, data);
-export const deletePantryItem = (pantryId, itemId) => api.delete(`/pantries/${pantryId}/items/${itemId}`);
-export const adjustStock = (pantryId, itemId, data) => api.post(`/pantries/${pantryId}/items/${itemId}/adjust`, data);
+// ── Pantry Items CRUD ──────────────────────────────────────
+export const getPantryItems = (pantryId) => api.get(PANTRY.ITEMS(pantryId));
+export const getPantryItemById = (pantryId, itemId) => api.get(PANTRY.ITEM(pantryId, itemId));
+export const createPantryItem = (pantryId, data) => api.post(PANTRY.ITEMS(pantryId), data);
+export const updatePantryItem = (pantryId, itemId, data) => api.patch(PANTRY.ITEM(pantryId, itemId), data);
+export const deletePantryItem = (pantryId, itemId) => api.delete(PANTRY.ITEM(pantryId, itemId));
+export const adjustStock = (pantryId, itemId, data) => api.post(PANTRY.ITEM_ADJUST(pantryId, itemId), data);
 
-// --- Alerts ---
-export const getExpiringItems = (pantryId, days = 7) => api.get(`/pantries/${pantryId}/expiring?days=${days}`);
-export const getExpiredItems = (pantryId) => api.get(`/pantries/${pantryId}/expired`);
-export const getLowStockItems = (pantryId) => api.get(`/pantries/${pantryId}/low-stock`);
+// ── Alerts & Status Queries ────────────────────────────────
+export const getExpiringItems = (pantryId, days = 7) => api.get(PANTRY.EXPIRING(pantryId, days));
+export const getExpiredItems = (pantryId) => api.get(PANTRY.EXPIRED(pantryId));
+export const getLowStockItems = (pantryId) => api.get(PANTRY.LOW_STOCK(pantryId));
