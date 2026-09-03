@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { motion } from 'framer-motion';
 import { useToast } from '../context/ToastContext';
 import { usePantry } from '../hooks/usePantry';
 import {
@@ -9,42 +10,39 @@ import {
 import { generateAIRecipe } from '../services/aiService';
 import { useDebouncedSearch } from '../hooks/useDebouncedSearch';
 import { formatIngredientQuantity } from '../utils/hoistingDemo';
+import { getErrorMessage } from '../utils/errorHandler';
+import Modal from '../components/ui/Modal';
+import Button from '../components/ui/Button';
+import ConfirmDialog from '../components/ui/ConfirmDialog';
+import { EmptyState } from '../components/ui/EmptyState';
+import { CardSkeleton } from '../components/ui/Skeleton';
 import {
-  BookOpen, Heart, Trash2, Plus, X, Sparkles,
-  Clock, Users, ChefHat, Search, Star, Package,
-  CheckCircle, AlertCircle, Loader2
+  BookOpen, Heart, Trash2, Sparkles,
+  Clock, Users, ChefHat, Search, Package,
+  CheckCircle2, AlertCircle, Loader2
 } from 'lucide-react';
 
 // ─── Difficulty Badge ──────────────────────────────────────────────────────────
 const DiffBadge = ({ level }) => {
   const map = {
-    EASY:   'bg-green-100 text-green-700',
-    MEDIUM: 'bg-amber-100 text-amber-700',
-    HARD:   'bg-red-100 text-red-700',
+    EASY:   'badge-success',
+    MEDIUM: 'badge-warning',
+    HARD:   'badge-danger',
   };
-  return (
-    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${map[level] || 'bg-sage/20 text-sage'}`}>
-      {level}
-    </span>
-  );
+  return <span className={`badge ${map[level] || 'badge-neutral'}`}>{level}</span>;
 };
 
 // ─── Pantry Match Badge ────────────────────────────────────────────────────────
 const MatchBadge = ({ match }) => {
   if (match === null) return null;
   const pct = Math.round(match * 100);
-  const color = pct >= 80 ? 'text-green-600 bg-green-50 border-green-200'
-    : pct >= 50 ? 'text-amber-600 bg-amber-50 border-amber-200'
-    : 'text-red-600 bg-red-50 border-red-200';
-  return (
-    <span className={`text-xs font-bold px-2 py-0.5 rounded-full border ${color}`}>
-      {pct}% match
-    </span>
-  );
+  const cls = pct >= 80 ? 'badge-success' : pct >= 50 ? 'badge-warning' : 'badge-danger';
+  return <span className={`badge ${cls}`}>{pct}% match</span>;
 };
 
 // ─── Recipe Detail Modal ───────────────────────────────────────────────────────
-const RecipeDetailModal = ({ recipe, pantryId, onClose, onFavoriteToggle, isFav, onSaved }) => {
+const RecipeDetailModal = ({ isOpen, recipe, pantryId, onClose, onFavoriteToggle, isFav, onSaved }) => {
+  if (!recipe) return null;
   const toast = useToast();
   const [ingredients, setIngredients] = useState(recipe.ingredients || []);
   const [loading, setLoading] = useState(!recipe.ingredients);
@@ -93,104 +91,97 @@ const RecipeDetailModal = ({ recipe, pantryId, onClose, onFavoriteToggle, isFav,
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
-        {/* Header */}
-        <div className="flex items-start justify-between p-6 border-b border-sage/20">
-          <div className="flex-1 min-w-0 pr-4">
-            <div className="flex items-center gap-2 flex-wrap mb-1">
-              {recipe.difficulty && <DiffBadge level={recipe.difficulty} />}
-              {recipe.cuisineType && (
-                <span className="text-xs bg-olive/20 text-bark px-2 py-0.5 rounded-full">{recipe.cuisineType}</span>
-              )}
-            </div>
-            <h2 className="text-xl font-bold text-bark">{recipe.title || recipe.name}</h2>
-            {recipe.description && <p className="text-sage text-sm mt-1">{recipe.description}</p>}
-          </div>
-          <div className="flex items-center gap-2 flex-shrink-0">
-            {recipe.id !== 'ai-preview' && (
-              <button onClick={() => onFavoriteToggle(recipe.id, isFav)}
-                className={`p-2 rounded-xl border transition-all ${isFav ? 'bg-red-50 border-red-200 text-red-500' : 'border-sage/30 text-sage hover:border-red-300 hover:text-red-400'}`}>
-                <Heart size={18} fill={isFav ? 'currentColor' : 'none'} />
-              </button>
-            )}
-            <button onClick={onClose} className="p-2 rounded-xl border border-sage/30 text-sage hover:text-bark transition-colors">
-              <X size={18} />
-            </button>
-          </div>
-        </div>
+    <Modal isOpen={isOpen} onClose={onClose} size="lg"
+      title={recipe.title || recipe.name}
+      footer={recipe.id === 'ai-preview' && (
+        <Button variant="primary" fullWidth loading={saving} onClick={handleSaveRecipe}>
+          Save Recipe to My Cookbook
+        </Button>
+      )}
+    >
+      {/* Title badges + favorite */}
+      <div className="flex items-center gap-2 flex-wrap mb-4 -mt-1">
+        {recipe.difficulty && <DiffBadge level={recipe.difficulty} />}
+        {recipe.cuisineType && <span className="badge badge-neutral">{recipe.cuisineType}</span>}
+        {recipe.id !== 'ai-preview' && (
+          <button onClick={() => onFavoriteToggle(recipe.id, isFav)}
+            className={`ml-auto p-1.5 rounded-xl border transition-all ${
+              isFav ? 'bg-red-50 border-red-200 text-red-500' : 'border-[rgba(138,144,112,0.25)] text-[var(--color-sage)] hover:text-red-400'
+            }`}>
+            <Heart size={16} fill={isFav ? 'currentColor' : 'none'} />
+          </button>
+        )}
+      </div>
+      {recipe.description && <p className="text-sm text-[var(--color-sage)] mb-4 leading-relaxed">{recipe.description}</p>}
 
-        <div className="overflow-y-auto flex-1 p-6 space-y-6">
-          {/* Meta row */}
-          <div className="flex flex-wrap gap-4 text-sm">
-            {recipe.prepTime && (
-              <div className="flex items-center gap-1.5 text-sage">
-                <Clock size={15} /><span>Prep: <strong className="text-bark">{recipe.prepTime}m</strong></span>
-              </div>
-            )}
-            {recipe.cookTime && (
-              <div className="flex items-center gap-1.5 text-sage">
-                <ChefHat size={15} /><span>Cook: <strong className="text-bark">{recipe.cookTime}m</strong></span>
-              </div>
-            )}
-            <div className="flex items-center gap-2 text-sage">
-              <Users size={15} />
-              <span>Servings:</span>
-              <div className="flex items-center gap-1">
-                <button onClick={() => setServings(s => Math.max(1, s - 1))}
-                  className="w-6 h-6 rounded-full bg-sage/20 text-bark font-bold flex items-center justify-center hover:bg-sage/40 transition-colors text-xs">−</button>
-                <span className="font-bold text-bark w-5 text-center">{servings}</span>
-                <button onClick={() => setServings(s => s + 1)}
-                  className="w-6 h-6 rounded-full bg-sage/20 text-bark font-bold flex items-center justify-center hover:bg-sage/40 transition-colors text-xs">+</button>
-              </div>
-            </div>
+      {/* Meta row */}
+      <div className="flex flex-wrap gap-4 text-sm mb-5 pb-4 border-b border-[rgba(138,144,112,0.12)]">
+        {recipe.prepTime && (
+          <div className="flex items-center gap-1.5 text-[var(--color-sage)]">
+            <Clock size={14}/><span>Prep: <strong className="text-[var(--color-dark)]">{recipe.prepTime}m</strong></span>
           </div>
-
-          {/* Ingredients */}
-          <div>
-            <h3 className="font-bold text-bark mb-3 flex items-center gap-2">
-              <Package size={16} className="text-sage" /> Ingredients
-            </h3>
-            {loading ? (
-              <div className="flex items-center gap-2 text-sage text-sm"><Loader2 size={16} className="animate-spin" /> Loading...</div>
-            ) : ingredients.length === 0 ? (
-              <p className="text-sage text-sm">No ingredients listed.</p>
-            ) : (
-              <ul className="space-y-2">
-                {ingredients.map((ing, i) => {
-                  const scaledQty = recipe.servings
-                    ? ((ing.quantity || 0) * servings / recipe.servings).toFixed(1).replace(/\.0$/, '')
-                    : ing.quantity;
-                  return (
-                    <li key={i} className="flex items-center justify-between py-1.5 border-b border-sage/10 last:border-0 text-sm">
-                      <span className="text-bark">{ing.name}</span>
-                      <span className="text-sage font-medium">{formatIngredientQuantity(scaledQty, ing.unit)}</span>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
+        )}
+        {recipe.cookTime && (
+          <div className="flex items-center gap-1.5 text-[var(--color-sage)]">
+            <ChefHat size={14}/><span>Cook: <strong className="text-[var(--color-dark)]">{recipe.cookTime}m</strong></span>
           </div>
-
-          {/* Instructions */}
-          {Array.isArray(recipe.instructions) && recipe.instructions.length > 0 && (
-            <div>
-              <h3 className="font-bold text-bark mb-3 flex items-center gap-2">
-                <BookOpen size={16} className="text-sage" /> Instructions
-              </h3>
-              <ol className="space-y-3">
-                {recipe.instructions.map((step, i) => (
-                  <li key={i} className="flex gap-3 text-sm text-bark/90">
-                    <span className="w-6 h-6 rounded-full bg-sage text-white text-xs font-bold flex items-center justify-center flex-shrink-0 mt-0.5">{i + 1}</span>
-                    <span className="leading-relaxed">{typeof step === 'string' ? step : step.description}</span>
-                  </li>
-                ))}
-              </ol>
-            </div>
-          )}
+        )}
+        <div className="flex items-center gap-2 text-[var(--color-sage)]">
+          <Users size={14}/>
+          <span>Servings:</span>
+          <div className="flex items-center gap-1">
+            <button onClick={() => setServings(s => Math.max(1, s - 1))}
+              className="w-6 h-6 rounded-full bg-[rgba(138,144,112,0.15)] text-[var(--color-dark)] font-bold flex items-center justify-center hover:bg-[rgba(138,144,112,0.3)] text-xs">−</button>
+            <span className="font-bold text-[var(--color-dark)] w-5 text-center">{servings}</span>
+            <button onClick={() => setServings(s => s + 1)}
+              className="w-6 h-6 rounded-full bg-[rgba(138,144,112,0.15)] text-[var(--color-dark)] font-bold flex items-center justify-center hover:bg-[rgba(138,144,112,0.3)] text-xs">+</button>
+          </div>
         </div>
       </div>
-    </div>
+
+      {/* Ingredients */}
+      <div className="mb-5">
+        <h3 className="font-bold text-[var(--color-dark)] mb-3 flex items-center gap-2 text-sm">
+          <Package size={15} className="text-[var(--color-sage)]" /> Ingredients
+        </h3>
+        {loading ? (
+          <div className="flex items-center gap-2 text-[var(--color-sage)] text-sm"><Loader2 size={15} className="animate-spin"/>Loading…</div>
+        ) : ingredients.length === 0 ? (
+          <p className="text-sm text-[var(--color-sage)]">No ingredients listed.</p>
+        ) : (
+          <ul className="space-y-1.5">
+            {ingredients.map((ing, i) => {
+              const scaledQty = recipe.servings
+                ? ((ing.quantity || 0) * servings / recipe.servings).toFixed(1).replace(/\.0$/, '')
+                : ing.quantity;
+              return (
+                <li key={i} className="flex items-center justify-between py-1.5 border-b border-[rgba(138,144,112,0.10)] last:border-0 text-sm">
+                  <span className="text-[var(--color-dark)]">{ing.name}</span>
+                  <span className="text-[var(--color-sage)] font-semibold">{formatIngredientQuantity(scaledQty, ing.unit)}</span>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+
+      {/* Instructions */}
+      {Array.isArray(recipe.instructions) && recipe.instructions.length > 0 && (
+        <div>
+          <h3 className="font-bold text-[var(--color-dark)] mb-3 flex items-center gap-2 text-sm">
+            <BookOpen size={15} className="text-[var(--color-sage)]" /> Instructions
+          </h3>
+          <ol className="space-y-3">
+            {recipe.instructions.map((step, i) => (
+              <li key={i} className="flex gap-3 text-sm text-[var(--color-dark)] opacity-85">
+                <span className="w-6 h-6 rounded-full bg-[var(--color-sage)] text-white text-xs font-bold flex items-center justify-center flex-shrink-0 mt-0.5">{i+1}</span>
+                <span className="leading-relaxed">{typeof step === 'string' ? step : step.description}</span>
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
+    </Modal>
   );
 };
 
@@ -232,56 +223,53 @@ const AIGenerateModal = ({ pantry, pantryItemsCount, onClose, onGenerated }) => 
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
-        <div className="flex items-center gap-3 mb-4">
-          <div className="w-10 h-10 bg-gradient-to-br from-sage to-bark rounded-xl flex items-center justify-center">
-            <Sparkles size={20} className="text-white" />
-          </div>
-          <div>
-            <h2 className="text-xl font-bold text-bark">Generate Recipe with AI</h2>
-            <p className="text-xs text-sage">Grounded in your active pantry stock</p>
-          </div>
+    <Modal isOpen={!!onClose} onClose={onClose} title="Generate Recipe with AI">
+      <div className="flex items-center gap-3 mb-4 -mt-1">
+        <div className="w-9 h-9 bg-gradient-to-br from-[var(--color-sage)] to-[var(--color-bark)] rounded-xl flex items-center justify-center">
+          <Sparkles size={17} className="text-white" />
         </div>
-
-        {pantryItemsCount === 0 && (
-          <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-4 text-xs text-amber-800 flex items-start gap-2">
-            <AlertCircle size={16} className="text-amber-600 flex-shrink-0 mt-0.5" />
-            <div>
-              <p className="font-semibold">Your pantry has 0 ingredients.</p>
-              <p className="mt-0.5">PantryPal's recipe generator uses your real pantry stock to design realistic recipes. Add ingredients in the <strong>My Pantry</strong> tab, or use the <strong>AI Assistant</strong> tab to brainstorm freely!</p>
-            </div>
-          </div>
-        )}
-
-        <p className="text-sage text-sm mb-3">Describe any cravings, cuisine preferences, or diet goals:</p>
-        <textarea
-          value={prompt}
-          onChange={e => setPrompt(e.target.value)}
-          rows={3}
-          placeholder="e.g. I want to make a burger with what I have…"
-          className="w-full px-4 py-3 rounded-xl border border-sage/30 focus:border-olive focus:ring-2 focus:ring-olive/30 outline-none transition-all text-sm resize-none mb-4"
-        />
-        <div className="flex gap-3">
-          <button onClick={onClose}
-            className="flex-1 py-2.5 rounded-xl border border-sage/30 text-sage font-medium text-sm hover:bg-sage/10 transition-colors">
-            Cancel
-          </button>
-          <button onClick={handleGenerate} disabled={!prompt.trim() || loading || pantryItemsCount === 0}
-            className="flex-1 py-2.5 rounded-xl bg-sage text-white font-medium text-sm hover:bg-bark transition-colors disabled:opacity-50 flex items-center justify-center gap-2">
-            {loading ? <><Loader2 size={16} className="animate-spin" /> Generating…</> : <><Sparkles size={16} /> Generate</>}
-          </button>
-        </div>
+        <p className="text-xs text-[var(--color-sage)]">Grounded in your active pantry stock ({pantryItemsCount} ingredients)</p>
       </div>
-    </div>
+
+      {pantryItemsCount === 0 && (
+        <div className="bg-[var(--color-warning-bg)] border border-[rgba(217,164,65,0.3)] rounded-xl p-3 mb-4 text-xs text-[var(--color-warning)] flex items-start gap-2">
+          <AlertCircle size={15} className="flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="font-bold">Your pantry has 0 ingredients.</p>
+            <p className="mt-0.5">Add ingredients in <strong>My Pantry</strong> first, or use the <strong>AI Assistant</strong> to brainstorm freely!</p>
+          </div>
+        </div>
+      )}
+
+      <p className="text-sm text-[var(--color-sage)] mb-3">Describe any cravings, cuisine preferences, or diet goals:</p>
+      <textarea
+        value={prompt}
+        onChange={(e) => setPrompt(e.target.value)}
+        rows={3}
+        placeholder="e.g. I want a quick pasta with what I have…"
+        className="input py-3 px-4 resize-none mb-4"
+      />
+      <Button
+        variant="primary" fullWidth
+        loading={loading}
+        disabled={!prompt.trim() || pantryItemsCount === 0}
+        icon={Sparkles}
+        onClick={handleGenerate}
+      >
+        Generate Recipe
+      </Button>
+    </Modal>
   );
 };
 
 // ─── Recipe Card ───────────────────────────────────────────────────────────────
-const RecipeCard = ({ recipe, isFav, pantryMatch, onOpen, onFavoriteToggle, onDelete }) => (
-  <div
+const RecipeCard = ({ recipe, isFav, pantryMatch, onOpen, onFavoriteToggle, onDelete, index }) => (
+  <motion.div
+    initial={{ opacity: 0, y: 12 }}
+    animate={{ opacity: 1, y: 0 }}
+    transition={{ duration: 0.2, delay: index * 0.04 }}
     onClick={() => onOpen(recipe)}
-    className="group bg-white rounded-2xl border border-sage/20 p-5 hover:shadow-lg hover:border-sage/40 transition-all duration-200 cursor-pointer flex flex-col gap-3"
+    className="group card card-hover p-5 cursor-pointer flex flex-col gap-3"
   >
     <div className="flex items-start justify-between gap-2">
       <div className="flex-1 min-w-0">
@@ -289,30 +277,30 @@ const RecipeCard = ({ recipe, isFav, pantryMatch, onOpen, onFavoriteToggle, onDe
           {recipe.difficulty && <DiffBadge level={recipe.difficulty} />}
           <MatchBadge match={pantryMatch} />
         </div>
-        <h3 className="font-bold text-bark leading-snug line-clamp-2">{recipe.title || recipe.name}</h3>
+        <h3 className="font-bold text-[var(--color-dark)] leading-snug line-clamp-2">{recipe.title || recipe.name}</h3>
       </div>
-      <div className="flex items-center gap-1 flex-shrink-0" onClick={e => e.stopPropagation()}>
+      <div className="flex items-center gap-1 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
         <button onClick={() => onFavoriteToggle(recipe.id, isFav)}
-          className={`p-1.5 rounded-lg transition-all ${isFav ? 'text-red-500' : 'text-sage hover:text-red-400'}`}>
-          <Heart size={16} fill={isFav ? 'currentColor' : 'none'} />
+          className={`p-1.5 rounded-lg transition-all ${isFav ? 'text-red-500' : 'text-[var(--color-sage)] hover:text-red-400'}`}>
+          <Heart size={15} fill={isFav ? 'currentColor' : 'none'} />
         </button>
         <button onClick={() => onDelete(recipe)}
-          className="p-1.5 rounded-lg text-sage hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100">
-          <Trash2 size={15} />
+          className="p-1.5 rounded-lg text-[var(--color-sage)] hover:text-red-500 hover:bg-red-50 transition-colors opacity-0 group-hover:opacity-100">
+          <Trash2 size={14} />
         </button>
       </div>
     </div>
 
     {recipe.description && (
-      <p className="text-sage text-xs leading-relaxed line-clamp-2">{recipe.description}</p>
+      <p className="text-[var(--color-sage)] text-xs leading-relaxed line-clamp-2">{recipe.description}</p>
     )}
 
-    <div className="flex items-center gap-3 text-xs text-sage mt-auto pt-1 border-t border-sage/10">
+    <div className="flex items-center gap-3 text-xs text-[var(--color-sage)] mt-auto pt-2 border-t border-[rgba(138,144,112,0.10)]">
       {recipe.prepTime && <span className="flex items-center gap-1"><Clock size={12} />{recipe.prepTime}m prep</span>}
       {recipe.cookTime && <span className="flex items-center gap-1"><ChefHat size={12} />{recipe.cookTime}m cook</span>}
       {recipe.servings && <span className="flex items-center gap-1"><Users size={12} />{recipe.servings} servings</span>}
     </div>
-  </div>
+  </motion.div>
 );
 
 // ─── Main Recipes Page ─────────────────────────────────────────────────────────
@@ -325,10 +313,11 @@ const Recipes = () => {
   const [pantryMatches, setPantryMatches] = useState({});
   const [loading, setLoading] = useState(true);
   const [search, debouncedSearch, setSearch] = useDebouncedSearch('');
-  const [filter, setFilter] = useState('all'); // all | favorites | ai
+  const [filter, setFilter] = useState('all');
   const [selectedRecipe, setSelectedRecipe] = useState(null);
   const [showAIModal, setShowAIModal] = useState(false);
-  const [aiPreview, setAiPreview] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleting, setDeleting] = useState(false);
 
   const loadRecipes = useCallback(async () => {
     setLoading(true);
@@ -384,19 +373,22 @@ const Recipes = () => {
     }
   };
 
-  const handleDelete = async (recipe) => {
-    if (!window.confirm(`Delete "${recipe.name}"? This cannot be undone.`)) return;
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
     try {
-      await deleteRecipe(recipe.id);
-      setRecipes(prev => prev.filter(r => r.id !== recipe.id));
-      toast(`"${recipe.name}" deleted.`, 'info');
-    } catch {
-      toast('Failed to delete recipe.', 'error');
+      await deleteRecipe(deleteTarget.id);
+      setRecipes((prev) => prev.filter((r) => r.id !== deleteTarget.id));
+      toast(`"${deleteTarget.title || deleteTarget.name}" deleted.`, 'info');
+      setDeleteTarget(null);
+    } catch (err) {
+      toast(getErrorMessage(err), 'error');
+    } finally {
+      setDeleting(false);
     }
   };
 
   const handleAIGenerated = (recipe) => {
-    setAiPreview(recipe);
     setSelectedRecipe({ ...recipe, id: 'ai-preview' });
   };
 
@@ -414,35 +406,39 @@ const Recipes = () => {
   });
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
+    <div className="page-container">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6 gap-4">
+      <motion.div
+        initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+        className="flex items-center justify-between mb-6 gap-4 flex-wrap"
+      >
         <div>
-          <h1 className="text-3xl font-bold text-bark">Recipe Browser</h1>
-          <p className="text-sage text-sm mt-1">{recipes.length} recipes · sorted by pantry match</p>
+          <h1 className="page-title">Recipe Browser</h1>
+          <p className="page-subtitle">{recipes.length} recipes · sorted by pantry match</p>
         </div>
-        <div className="flex gap-2">
-          <button onClick={() => setShowAIModal(true)}
-            className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-sage to-bark text-white rounded-xl hover:opacity-90 transition-opacity font-medium text-sm shadow-md">
-            <Sparkles size={16} /> Generate with AI
-          </button>
-        </div>
-      </div>
+        <Button
+          variant="primary"
+          icon={Sparkles}
+          onClick={() => setShowAIModal(true)}
+          className="bg-gradient-to-r from-[var(--color-sage)] to-[var(--color-bark)] border-0"
+        >
+          Generate with AI
+        </Button>
+      </motion.div>
 
       {/* Filters */}
-      <div className="flex flex-col sm:flex-row gap-3 mb-6">
+      <div className="flex flex-col sm:flex-row gap-3 mb-5">
         <div className="relative flex-1">
-          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-sage" />
-          <input value={search} onChange={e => setSearch(e.target.value)}
-            placeholder="Search recipes…"
-            className="w-full pl-9 pr-4 py-2.5 rounded-xl border border-sage/30 focus:border-olive focus:ring-2 focus:ring-olive/30 outline-none transition-all text-sm"
+          <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--color-sage)] pointer-events-none" />
+          <input value={search} onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search recipes…" className="input pl-10"
           />
         </div>
         <div className="flex gap-2">
           {[['all', 'All'], ['favorites', '❤️ Favorites']].map(([val, label]) => (
             <button key={val} onClick={() => setFilter(val)}
-              className={`px-4 py-2.5 rounded-xl text-sm font-medium transition-colors ${
-                filter === val ? 'bg-sage text-white' : 'border border-sage/30 text-sage hover:border-bark hover:text-bark'
+              className={`px-3.5 py-2 rounded-xl text-sm font-semibold transition-all ${
+                filter === val ? 'bg-[var(--color-sage)] text-white shadow-sm' : 'border border-[rgba(138,144,112,0.25)] text-[var(--color-sage)] hover:border-[var(--color-bark)] hover:text-[var(--color-bark)]'
               }`}>
               {label}
             </button>
@@ -452,60 +448,57 @@ const Recipes = () => {
 
       {/* Pantry match legend */}
       {activePantry && Object.keys(pantryMatches).length > 0 && (
-        <div className="flex flex-wrap items-center gap-3 mb-4 text-xs text-sage">
-          <span className="font-medium">Pantry match:</span>
-          <span className="flex items-center gap-1"><CheckCircle size={12} className="text-green-500" /> ≥80% can cook now</span>
-          <span className="flex items-center gap-1"><AlertCircle size={12} className="text-amber-500" /> 50–79% missing some</span>
-          <span className="flex items-center gap-1"><AlertCircle size={12} className="text-red-400" /> &lt;50% missing most</span>
+        <div className="flex flex-wrap items-center gap-3 mb-4 text-xs text-[var(--color-sage)]">
+          <span className="font-semibold">Pantry match:</span>
+          <span className="flex items-center gap-1"><CheckCircle2 size={11} className="text-[var(--color-success)]" /> ≥80% can cook</span>
+          <span className="flex items-center gap-1"><AlertCircle size={11} className="text-[var(--color-warning)]" /> 50–79% partial</span>
+          <span className="flex items-center gap-1"><AlertCircle size={11} className="text-[var(--color-danger)]" /> &lt;50% missing most</span>
         </div>
       )}
 
       {/* Grid */}
       {loading ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="bg-white rounded-2xl border border-sage/10 p-5 animate-pulse h-44" />
-          ))}
+          {Array.from({ length: 6 }).map((_, i) => <CardSkeleton key={i} />)}
         </div>
       ) : sorted.length === 0 ? (
-        <div className="text-center py-20">
-          <BookOpen size={48} className="mx-auto text-olive mb-4" />
-          <h2 className="text-xl font-bold text-bark mb-2">
-            {search ? `No recipes matching "${search}"` : filter === 'favorites' ? 'No favorite recipes yet' : 'No recipes yet'}
-          </h2>
-          <p className="text-sage text-sm mb-6">Use the AI generator to create your first recipe!</p>
-          <button onClick={() => setShowAIModal(true)}
-            className="px-6 py-3 bg-sage text-white rounded-xl hover:bg-bark transition-colors font-medium">
-            Generate with AI
-          </button>
+        <div className="card">
+          <EmptyState
+            icon={BookOpen}
+            title={search ? `No results for "${search}"` : filter === 'favorites' ? 'No favorites yet' : 'No recipes yet'}
+            description="Generate a recipe with AI from your pantry stock!"
+            action={{ label: 'Generate with AI', icon: Sparkles, onClick: () => setShowAIModal(true) }}
+          />
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-          {sorted.map(recipe => (
+          {sorted.map((recipe, i) => (
             <RecipeCard
               key={recipe.id}
               recipe={recipe}
+              index={i}
               isFav={favorites.has(recipe.id)}
               pantryMatch={pantryMatches[recipe.id] ?? null}
               onOpen={setSelectedRecipe}
               onFavoriteToggle={handleFavoriteToggle}
-              onDelete={handleDelete}
+              onDelete={setDeleteTarget}
             />
           ))}
         </div>
       )}
 
-      {/* Modals */}
-      {selectedRecipe && (
-        <RecipeDetailModal
-          recipe={selectedRecipe}
-          pantryId={activePantry?.id}
-          onClose={() => setSelectedRecipe(null)}
-          isFav={favorites.has(selectedRecipe.id)}
-          onFavoriteToggle={handleFavoriteToggle}
-          onSaved={loadRecipes}
-        />
-      )}
+      {/* Detail Modal */}
+      <RecipeDetailModal
+        isOpen={!!selectedRecipe}
+        recipe={selectedRecipe}
+        pantryId={activePantry?.id}
+        onClose={() => setSelectedRecipe(null)}
+        isFav={selectedRecipe ? favorites.has(selectedRecipe.id) : false}
+        onFavoriteToggle={handleFavoriteToggle}
+        onSaved={loadRecipes}
+      />
+
+      {/* AI Generate Modal */}
       {showAIModal && (
         <AIGenerateModal
           pantry={activePantry}
@@ -514,6 +507,17 @@ const Recipes = () => {
           onGenerated={handleAIGenerated}
         />
       )}
+
+      {/* Delete Confirm */}
+      <ConfirmDialog
+        isOpen={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={handleDelete}
+        loading={deleting}
+        title="Delete recipe?"
+        description={`"${deleteTarget?.title || deleteTarget?.name}" will be permanently deleted.`}
+        confirmLabel="Delete"
+      />
     </div>
   );
 };
