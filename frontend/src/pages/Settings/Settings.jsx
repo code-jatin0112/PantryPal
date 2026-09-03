@@ -113,6 +113,31 @@ const Settings = () => {
     loadBackendPreferences();
   }, []);
 
+  // Apply visual theme and accessibility settings to DOM immediately
+  useEffect(() => {
+    const root = document.documentElement;
+    const theme = settings.theme || 'parchment';
+    root.setAttribute('data-theme', theme);
+
+    if (theme === 'slate') {
+      root.classList.add('dark');
+    } else {
+      root.classList.remove('dark');
+    }
+
+    if (settings.compactMode) {
+      root.classList.add('compact-mode');
+    } else {
+      root.classList.remove('compact-mode');
+    }
+
+    if (settings.animations === false) {
+      root.classList.add('disable-animations');
+    } else {
+      root.classList.remove('disable-animations');
+    }
+  }, [settings.theme, settings.compactMode, settings.animations]);
+
   // Persist to backend and locally
   const handleSave = async () => {
     try {

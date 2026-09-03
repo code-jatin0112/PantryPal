@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
+import { ChefHat, ArrowLeft, Plus } from 'lucide-react';
 
 import CookingProgress from '../../components/cooking/CookingProgress';
 import StepCard from '../../components/cooking/StepCard';
@@ -9,9 +10,9 @@ import CookingTimer from '../../components/cooking/CookingTimer';
 import RecipeSummary from '../../components/cooking/RecipeSummary';
 import NotesPanel from '../../components/cooking/NotesPanel';
 import CompletionModal from '../../components/cooking/CompletionModal';
-import { DEFAULT_COOKING_RECIPE } from '../../components/cooking/cookingMockData';
+import Button from '../../components/ui/Button';
 
-import { getRecipeById, getRecipeIngredients } from '../../services/recipeService';
+import { getRecipes, getRecipeById, getRecipeIngredients } from '../../services/recipeService';
 import {
   startCookingSession,
   updateCookingProgress,
@@ -24,9 +25,10 @@ const CookingMode = () => {
   const navigate = useNavigate();
   const toast = useToast();
 
-  const [recipe, setRecipe] = useState(DEFAULT_COOKING_RECIPE);
-  const [steps, setSteps] = useState(DEFAULT_COOKING_RECIPE.steps);
-  const [ingredients, setIngredients] = useState(DEFAULT_COOKING_RECIPE.ingredients);
+  const [loading, setLoading] = useState(true);
+  const [recipe, setRecipe] = useState(null);
+  const [steps, setSteps] = useState([]);
+  const [ingredients, setIngredients] = useState([]);
   const [backendSessionId, setBackendSessionId] = useState(null);
 
   // Cooking state
@@ -37,9 +39,101 @@ const CookingMode = () => {
   const [showCompletionModal, setShowCompletionModal] = useState(false);
 
   // Storage key
-  const storageKey = `pantrypal_cooking_${recipeId || 'default'}`;
+  const storageKey = `pantrypal_cooking_${recipeId || recipe?.id || 'default'}`;
 
-  // 1. Load initial saved state from localStorage
+  // 1. Fetch recipe from backend
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadRecipeForCooking = async () => {
+      setLoading(true);
+      try {
+        let activeId = recipeId;
+
+        // If no specific recipeId, fetch first available from user's cookbook
+        if (!activeId) {
+          const recipesRes = await getRecipes();
+          const list = recipesRes.data?.data?.recipes || recipesRes.data?.data || [];
+          if (list.length > 0) {
+            activeId = list[0].id;
+          }
+        }
+
+        if (!activeId) {
+          if (isMounted) {
+            setRecipe(null);
+            setLoading(false);
+          }
+          return;
+        }
+
+        const [recipeRes, ingRes, sessionRes] = await Promise.allSettled([
+          getRecipeById(activeId),
+          getRecipeIngredients(activeId),
+          startCookingSession(activeId),
+        ]);
+
+        if (isMounted) {
+          if (recipeRes.status === 'fulfilled') {
+            const rData = recipeRes.value.data.data?.recipe || recipeRes.value.data.data;
+            if (rData) {
+              setRecipe(rData);
+
+              // Parse instructions into structured steps
+              let parsedSteps = [];
+              if (Array.isArray(rData.instructions)) {
+                parsedSteps = rData.instructions.map((inst, i) => ({
+                  title: `Step ${i + 1}`,
+                  instruction: typeof inst === 'string' ? inst : inst.description || '',
+                  estimatedTime: 5,
+                }));
+              } else if (typeof rData.instructions === 'string' && rData.instructions.trim()) {
+                parsedSteps = rData.instructions
+                  .split('\n')
+                  .map((l) => l.trim())
+                  .filter((line) => line.length > 0)
+                  .map((inst, i) => ({
+                    title: `Step ${i + 1}`,
+                    instruction: inst.replace(/^\d+[\.\)]\s*/, ''),
+                    estimatedTime: 5,
+                  }));
+              }
+
+              if (parsedSteps.length === 0) {
+                parsedSteps = [
+                  { title: 'Step 1: Preparation', instruction: 'Prepare ingredients according to recipe specifications.', estimatedTime: 5 },
+                  { title: 'Step 2: Cooking', instruction: 'Cook the ingredients as required.', estimatedTime: 15 },
+                  { title: 'Step 3: Plating', instruction: 'Plate and serve warm.', estimatedTime: 5 },
+                ];
+              }
+              setSteps(parsedSteps);
+            }
+          }
+
+          if (ingRes.status === 'fulfilled') {
+            const ingList = ingRes.value.data.data?.ingredients || ingRes.value.data.data || [];
+            setIngredients(ingList);
+          }
+
+          if (sessionRes.status === 'fulfilled' && sessionRes.value?.data?.id) {
+            setBackendSessionId(sessionRes.value.data.id);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load cooking session recipe:', err);
+      } finally {
+        if (isMounted) setLoading(false);
+      }
+    };
+
+    loadRecipeForCooking();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [recipeId]);
+
+  // 2. Load saved progress from localStorage
   useEffect(() => {
     try {
       const saved = localStorage.getItem(storageKey);
@@ -49,79 +143,11 @@ const CookingMode = () => {
         if (Array.isArray(parsed.completedSteps)) setCompletedSteps(new Set(parsed.completedSteps));
         if (Array.isArray(parsed.checkedIngredients)) setCheckedIngredients(new Set(parsed.checkedIngredients));
         if (typeof parsed.notes === 'string') setNotes(parsed.notes);
-        if (parsed.backendSessionId) setBackendSessionId(parsed.backendSessionId);
       }
-    } catch {
-      // Ignore localStorage parse errors
-    }
+    } catch {}
   }, [storageKey]);
 
-  // 2. Fetch recipe from backend if exists & initialize backend session
-  useEffect(() => {
-    if (!recipeId || recipeId === 'demo' || recipeId === 'butter-chicken') {
-      return;
-    }
-
-    const initCooking = async () => {
-      try {
-        const [recipeRes, ingRes, sessionRes] = await Promise.allSettled([
-          getRecipeById(recipeId),
-          getRecipeIngredients(recipeId),
-          startCookingSession(recipeId),
-        ]);
-
-        if (recipeRes.status === 'fulfilled') {
-          const rData = recipeRes.value.data.data?.recipe || recipeRes.value.data.data;
-          if (rData) {
-            setRecipe((prev) => ({
-              ...prev,
-              ...rData,
-              title: rData.title || rData.name || prev.title,
-            }));
-
-            // Parse instructions into structured steps if available
-            if (rData.instructions) {
-              const parsedSteps = Array.isArray(rData.instructions)
-                ? rData.instructions.map((inst, i) => ({
-                    title: `Step ${i + 1}`,
-                    instruction: typeof inst === 'string' ? inst : inst.description || '',
-                    estimatedTime: 5,
-                  }))
-                : String(rData.instructions)
-                    .split('\n')
-                    .filter((line) => line.trim().length > 0)
-                    .map((inst, i) => ({
-                      title: `Step ${i + 1}`,
-                      instruction: inst.replace(/^\d+[\.\)]\s*/, ''),
-                      estimatedTime: 5,
-                    }));
-
-              if (parsedSteps.length > 0) {
-                setSteps(parsedSteps);
-              }
-            }
-          }
-        }
-
-        if (ingRes.status === 'fulfilled') {
-          const ingList = ingRes.value.data.data?.ingredients || ingRes.value.data.data || [];
-          if (ingList.length > 0) {
-            setIngredients(ingList);
-          }
-        }
-
-        if (sessionRes.status === 'fulfilled' && sessionRes.value?.data?.id) {
-          setBackendSessionId(sessionRes.value.data.id);
-        }
-      } catch {
-        // Fallback gracefully to default rich recipe data
-      }
-    };
-
-    initCooking();
-  }, [recipeId]);
-
-  // 3. Save progress to localStorage and backend
+  // 3. Save progress
   const saveProgress = useCallback(
     (stepIdx, compSteps, chkIngs, notesText) => {
       try {
@@ -146,25 +172,16 @@ const CookingMode = () => {
     [storageKey, backendSessionId]
   );
 
-  // Toggle step complete
-  const handleToggleStepComplete = () => {
-    const next = new Set(completedSteps);
-    if (next.has(currentStepIndex)) {
-      next.delete(currentStepIndex);
-    } else {
-      next.add(currentStepIndex);
-      toast(`Step ${currentStepIndex + 1} completed! ✨`, 'success');
-    }
-    setCompletedSteps(next);
-    saveProgress(currentStepIndex, next, checkedIngredients, notes);
-  };
-
   // Step navigation
   const handleNextStep = () => {
     if (currentStepIndex < steps.length - 1) {
       const nextIdx = currentStepIndex + 1;
+      const nextCompleted = new Set(completedSteps).add(currentStepIndex);
       setCurrentStepIndex(nextIdx);
-      saveProgress(nextIdx, completedSteps, checkedIngredients, notes);
+      setCompletedSteps(nextCompleted);
+      saveProgress(nextIdx, nextCompleted, checkedIngredients, notes);
+    } else {
+      handleFinishRecipe();
     }
   };
 
@@ -176,64 +193,112 @@ const CookingMode = () => {
     }
   };
 
-  const handleSelectStep = (idx) => {
-    setCurrentStepIndex(idx);
-    saveProgress(idx, completedSteps, checkedIngredients, notes);
-  };
-
-  // Toggle ingredient checklist
-  const handleToggleIngredient = (idx) => {
-    const next = new Set(checkedIngredients);
-    if (next.has(idx)) {
-      next.delete(idx);
-    } else {
-      next.add(idx);
+  const handleSelectStep = (index) => {
+    if (index >= 0 && index < steps.length) {
+      setCurrentStepIndex(index);
+      saveProgress(index, completedSteps, checkedIngredients, notes);
     }
-    setCheckedIngredients(next);
-    saveProgress(currentStepIndex, completedSteps, next, notes);
   };
 
-  // Notes update
-  const handleNotesChange = (text) => {
-    setNotes(text);
-    saveProgress(currentStepIndex, completedSteps, checkedIngredients, text);
+  const handleToggleStepComplete = (index) => {
+    const updated = new Set(completedSteps);
+    if (updated.has(index)) {
+      updated.delete(index);
+    } else {
+      updated.add(index);
+      toast(`Step ${index + 1} completed! ✨`, 'success');
+    }
+    setCompletedSteps(updated);
+    saveProgress(currentStepIndex, updated, checkedIngredients, notes);
   };
 
-  // Finish Recipe
+  const handleToggleIngredient = (index) => {
+    const updated = new Set(checkedIngredients);
+    if (updated.has(index)) {
+      updated.delete(index);
+    } else {
+      updated.add(index);
+    }
+    setCheckedIngredients(updated);
+    saveProgress(currentStepIndex, completedSteps, updated, notes);
+  };
+
+  const handleNotesChange = (newNotes) => {
+    setNotes(newNotes);
+    saveProgress(currentStepIndex, completedSteps, checkedIngredients, newNotes);
+  };
+
   const handleFinishRecipe = async () => {
-    // Mark all steps complete
-    const all = new Set(steps.map((_, i) => i));
-    setCompletedSteps(all);
-    saveProgress(currentStepIndex, all, checkedIngredients, notes);
+    const allDone = new Set(Array.from({ length: steps.length }, (_, i) => i));
+    setCompletedSteps(allDone);
+    setShowCompletionModal(true);
 
     if (backendSessionId) {
-      await completeCookingSession(backendSessionId).catch(() => {});
+      try {
+        await completeCookingSession(backendSessionId);
+      } catch {}
     }
-
-    setShowCompletionModal(true);
   };
 
-  // Cook Again action
   const handleCookAgain = () => {
     setCurrentStepIndex(0);
     setCompletedSteps(new Set());
     setCheckedIngredients(new Set());
     setShowCompletionModal(false);
     localStorage.removeItem(storageKey);
-    toast('Cook session reset! Ready to start fresh. 🍳', 'info');
-  };
-
-  const handleBackToRecipes = () => {
-    setShowCompletionModal(false);
-    navigate('/recipes');
+    toast('Cooking studio session reset. Ready to cook again! 🍳', 'info');
   };
 
   const handleExit = () => {
-    navigate(`/recipes/${recipeId && recipeId !== 'butter-chicken-demo' ? recipeId : ''}`);
+    navigate('/recipes');
   };
 
-  const currentStep = steps[currentStepIndex] || steps[0];
-  const totalCookTime = (recipe.prepTime || 15) + (recipe.cookTime || 25);
+  const handleBackToRecipes = () => {
+    navigate('/recipes');
+  };
+
+  if (loading) {
+    return (
+      <div className="py-20 flex flex-col items-center justify-center space-y-4">
+        <div className="w-12 h-12 rounded-2xl bg-[rgba(138,144,112,0.15)] flex items-center justify-center text-[var(--color-sage)] animate-pulse">
+          <ChefHat size={24} />
+        </div>
+        <p className="text-sm font-semibold text-[var(--color-sage)]">Loading Cooking Studio...</p>
+      </div>
+    );
+  }
+
+  if (!recipe) {
+    return (
+      <div className="py-16 max-w-lg mx-auto text-center space-y-5 bg-white p-8 rounded-3xl border border-[rgba(138,144,112,0.2)] shadow-sm">
+        <div className="w-16 h-16 rounded-2xl bg-[var(--color-parchment)] flex items-center justify-center text-[var(--color-sage)] mx-auto">
+          <ChefHat size={32} />
+        </div>
+        <div className="space-y-1.5">
+          <h2 className="text-xl font-bold text-[var(--color-dark)]">No recipe selected</h2>
+          <p className="text-xs text-[var(--color-sage)]">
+            Select a recipe from your cookbook or create a new recipe to start interactive cooking mode.
+          </p>
+        </div>
+        <div className="flex items-center justify-center gap-3 pt-2">
+          <Button variant="secondary" size="md" icon={ArrowLeft} onClick={() => navigate('/recipes')}>
+            Cookbook
+          </Button>
+          <Button variant="primary" size="md" icon={Plus} onClick={() => navigate('/recipes/new')}>
+            Create Recipe
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  const currentStep = steps[currentStepIndex] || {
+    title: `Step ${currentStepIndex + 1}`,
+    instruction: 'Follow recipe instructions.',
+    estimatedTime: 5,
+  };
+
+  const totalCookTime = (recipe.prepTime || 0) + (recipe.cookTime || 0) || 30;
 
   return (
     <motion.div
@@ -283,7 +348,7 @@ const CookingMode = () => {
 
           {/* Bottom Notes Panel */}
           <NotesPanel
-            recipeId={recipeId}
+            recipeId={recipe.id}
             initialNotes={notes}
             onNotesChange={handleNotesChange}
           />

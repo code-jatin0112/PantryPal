@@ -79,12 +79,75 @@
     scroll-behavior: smooth;
   }
 
+  /* ── Theme Definitions ── */
+  :root, [data-theme="parchment"] {
+    --color-parchment:  #FAF8F3;
+    --color-parchment-dark: #F2EEE4;
+    --color-sage:       #8A9070;
+    --color-sage-light: #A8B492;
+    --color-olive:      #B8C39A;
+    --color-bark:       #5E5947;
+    --color-dark:       #272A1F;
+  }
+
+  [data-theme="linen"] {
+    --color-parchment:  #F5F2EB;
+    --color-parchment-dark: #EBE5D8;
+    --color-sage:       #7D8565;
+    --color-sage-light: #9CA784;
+    --color-olive:      #A8B490;
+    --color-bark:       #524D3D;
+    --color-dark:       #22251D;
+  }
+
+  [data-theme="slate"], html.dark {
+    --color-parchment:  #181A15;
+    --color-parchment-dark: #121410;
+    --color-sage:       #A4AE88;
+    --color-sage-light: #B8C39A;
+    --color-olive:      #8A9070;
+    --color-bark:       #C8C2B4;
+    --color-dark:       #F7F6F2;
+  }
+
   body {
     font-family: var(--font-sans);
     background-color: var(--color-parchment);
     color: var(--color-dark);
     line-height: 1.6;
     font-size: 15px;
+    transition: background-color 0.2s ease, color 0.2s ease;
+  }
+
+  /* Dark Theme Card Overrides */
+  [data-theme="slate"] .bg-white, html.dark .bg-white {
+    background-color: #21241C !important;
+    border-color: rgba(164, 174, 136, 0.22) !important;
+    color: #F7F6F2;
+  }
+
+  [data-theme="slate"] input, [data-theme="slate"] select, [data-theme="slate"] textarea,
+  html.dark input, html.dark select, html.dark textarea {
+    background-color: #21241C !important;
+    color: #F7F6F2 !important;
+    border-color: rgba(164, 174, 136, 0.3) !important;
+  }
+
+  /* Compact Mode */
+  html.compact-mode body {
+    font-size: 14px;
+  }
+  html.compact-mode .p-5, html.compact-mode .p-6 {
+    padding: 1rem !important;
+  }
+
+  /* Disable Animations */
+  html.disable-animations *,
+  html.disable-animations *::before,
+  html.disable-animations *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
   }
 
   /* Focus styles — accessible */
