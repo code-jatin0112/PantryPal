@@ -76,11 +76,12 @@ const Navbar = ({ onOpenSidebar }) => {
       <div className="flex items-center gap-3">
         {/* Notification Bell */}
         <button
-          className="relative p-2.5 rounded-xl text-[var(--color-sage)] hover:text-[var(--color-dark)] hover:bg-[var(--color-parchment)] transition-colors"
-          aria-label="Notifications"
+          onClick={() => navigate('/notifications')}
+          className="relative p-2.5 rounded-xl text-[var(--color-sage)] hover:text-[var(--color-dark)] hover:bg-[var(--color-parchment)] transition-colors cursor-pointer"
+          aria-label="Open Notifications Center"
         >
           <Bell size={18} />
-          <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-amber-500 ring-2 ring-white" />
+          <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-emerald-500 ring-2 ring-white animate-pulse" />
         </button>
 
         <div className="h-6 w-[1px] bg-[rgba(138,144,112,0.15)] hidden sm:block" />
