@@ -19,6 +19,7 @@ const Recipes         = lazy(() => import('./pages/Recipes'));
 const RecipeDetails   = lazy(() => import('./pages/Recipes/RecipeDetails'));
 const CreateRecipe    = lazy(() => import('./pages/Recipes/CreateRecipe'));
 const EditRecipe      = lazy(() => import('./pages/Recipes/EditRecipe'));
+const CookingMode     = lazy(() => import('./pages/CookingMode/CookingMode'));
 const ShoppingList    = lazy(() => import('./pages/ShoppingList'));
 const MealPlans       = lazy(() => import('./pages/MealPlans/MealPlans'));
 const MealPlanDetails = lazy(() => import('./pages/MealPlans/MealPlanDetails'));
@@ -55,24 +56,26 @@ const AppLayout = () => {
       <Suspense fallback={<FullPageSpinner label="Loading page…" />}>
         <PageTransition>
           <Routes>
-            <Route path="/"                   element={<Dashboard />} />
-            <Route path="/pantry"             element={<Pantry />} />
-            <Route path="/pantry/add"         element={<AddPantryItem />} />
-            <Route path="/pantry/:id/edit"    element={<EditPantryItem />} />
-            <Route path="/recipes"            element={<Recipes />} />
-            <Route path="/recipes/new"        element={<CreateRecipe />} />
-            <Route path="/recipes/:id"        element={<RecipeDetails />} />
-            <Route path="/recipes/:id/edit"   element={<EditRecipe />} />
-            <Route path="/shopping-list"      element={<ShoppingList />} />
-            <Route path="/meal-plans"         element={<MealPlans />} />
-            <Route path="/meal-plans/new"     element={<CreateMealPlan />} />
-            <Route path="/meal-plans/:id"     element={<MealPlanDetails />} />
+            <Route path="/"                    element={<Dashboard />} />
+            <Route path="/pantry"              element={<Pantry />} />
+            <Route path="/pantry/add"          element={<AddPantryItem />} />
+            <Route path="/pantry/:id/edit"     element={<EditPantryItem />} />
+            <Route path="/recipes"             element={<Recipes />} />
+            <Route path="/recipes/new"         element={<CreateRecipe />} />
+            <Route path="/recipes/:id"         element={<RecipeDetails />} />
+            <Route path="/recipes/:id/edit"    element={<EditRecipe />} />
+            <Route path="/cooking/:recipeId"   element={<CookingMode />} />
+            <Route path="/cooking"             element={<CookingMode />} />
+            <Route path="/shopping-list"       element={<ShoppingList />} />
+            <Route path="/meal-plans"          element={<MealPlans />} />
+            <Route path="/meal-plans/new"      element={<CreateMealPlan />} />
+            <Route path="/meal-plans/:id"      element={<MealPlanDetails />} />
             <Route path="/meal-plans/:id/edit" element={<EditMealPlan />} />
-            <Route path="/meal-planner"       element={<MealPlanner />} />
-            <Route path="/assistant"          element={<Assistant />} />
-            <Route path="/preferences"        element={<Preferences />} />
-            <Route path="/profile"            element={<Profile />} />
-            <Route path="*"                   element={<NotFound />} />
+            <Route path="/meal-planner"        element={<MealPlanner />} />
+            <Route path="/assistant"           element={<Assistant />} />
+            <Route path="/preferences"         element={<Preferences />} />
+            <Route path="/profile"             element={<Profile />} />
+            <Route path="*"                    element={<NotFound />} />
           </Routes>
         </PageTransition>
       </Suspense>

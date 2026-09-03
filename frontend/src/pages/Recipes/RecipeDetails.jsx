@@ -248,6 +248,13 @@ const RecipeDetails = () => {
             Edit
           </Button>
           <Button
+            variant="primary"
+            size="sm"
+            onClick={() => navigate(`/cooking/${id}`)}
+          >
+            Start Cooking
+          </Button>
+          <Button
             variant="danger"
             size="sm"
             icon={Trash2}
