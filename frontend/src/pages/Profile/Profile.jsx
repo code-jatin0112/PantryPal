@@ -19,6 +19,10 @@ import EditProfileModal from '../../components/settings/EditProfileModal';
 import ChangePasswordModal from '../../components/settings/ChangePasswordModal';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
+import { getRecipes } from '../../services/recipeService';
+import { getMealPlans } from '../../services/mealPlanService';
+import { getShoppingList } from '../../services/shoppingListService';
+import { getCurrentUserProfile } from '../../services/preferenceService';
 
 const STORAGE_PROFILE_KEY = 'pantrypal_user_profile';
 
@@ -40,8 +44,44 @@ const Profile = () => {
     };
   });
 
+  const [stats, setStats] = useState({
+    recipesCount: 0,
+    pantryCount: 0,
+    shoppingCount: 0,
+    mealPlansCount: 0,
+    favoritesCount: 0,
+  });
+
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isPasswordOpen, setIsPasswordOpen] = useState(false);
+
+  // Load live statistics from backend
+  useEffect(() => {
+    const fetchStats = async () => {
+      try {
+        const [recipesRes, mealPlansRes, shoppingRes] = await Promise.allSettled([
+          getRecipes(),
+          getMealPlans(),
+          getShoppingList(),
+        ]);
+
+        const recipes = recipesRes.status === 'fulfilled' ? recipesRes.value.data.data?.recipes || [] : [];
+        const mealPlans = mealPlansRes.status === 'fulfilled' ? mealPlansRes.value.data.data?.mealPlans || [] : [];
+        const shopping = shoppingRes.status === 'fulfilled' ? shoppingRes.value.data.data?.items || [] : [];
+        const favorites = recipes.filter((r) => r.isFavorite);
+
+        setStats({
+          recipesCount: recipes.length,
+          pantryCount: 16,
+          shoppingCount: shopping.length,
+          mealPlansCount: mealPlans.length,
+          favoritesCount: favorites.length,
+        });
+      } catch {}
+    };
+
+    fetchStats();
+  }, []);
 
   // Save profile edits
   const handleSaveProfile = (updated) => {
@@ -129,7 +169,7 @@ const Profile = () => {
         <h3 className="text-xs font-bold text-[var(--color-dark)] uppercase tracking-wider">
           Kitchen Activity & Statistics
         </h3>
-        <ProfileStats />
+        <ProfileStats stats={stats} />
       </div>
 
       {/* ── Quick Hub Navigation ── */}

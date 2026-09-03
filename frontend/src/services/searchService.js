@@ -1,190 +1,31 @@
 import api from './api';
+import { RECIPES, PANTRY, MEAL_PLANS, SHOPPING } from '../constants/api';
 
-// Comprehensive search index fixtures for immediate offline/hybrid global search
-const GLOBAL_SEARCH_INDEX = [
-  // Recipes
-  {
-    id: 'rec-1',
-    category: 'recipes',
-    title: 'Royal Butter Chicken (Murgh Makhani)',
-    subtitle: 'Rich tomato, cream & spiced butter chicken curry',
-    metadata: '40 mins • 4 servings • Medium',
-    url: '/recipes/butter-chicken-demo',
-    isFavorite: true,
-  },
-  {
-    id: 'rec-2',
-    category: 'recipes',
-    title: 'Tuscan Garlic Herb Chicken Breast',
-    subtitle: 'Seared chicken with wilted spinach and garlic cream',
-    metadata: '25 mins • 3 servings • Easy',
-    url: '/recipes/rec-1',
-    isFavorite: true,
-  },
-  {
-    id: 'rec-3',
-    category: 'recipes',
-    title: 'High-Protein Lemon Herb Quinoa Bowl',
-    subtitle: 'Mediterranean grain bowl with roasted chickpeas & feta',
-    metadata: '20 mins • 2 servings • Easy',
-    url: '/recipes/rec-2',
-    isFavorite: false,
-  },
-  {
-    id: 'rec-4',
-    category: 'recipes',
-    title: 'Creamy Avocado Pesto Penne',
-    subtitle: 'Plant-based silky avocado basil sauce with whole grain pasta',
-    metadata: '15 mins • 2 servings • Easy',
-    url: '/recipes/rec-4',
-    isFavorite: false,
-  },
-
-  // Pantry Items
-  {
-    id: 'pan-1',
-    category: 'pantry',
-    title: 'Boneless Chicken Thighs',
-    subtitle: 'Meat & Poultry container • 800g in stock',
-    metadata: 'Fresh • Expiring in 4 days',
-    url: '/pantry',
-    isFavorite: false,
-  },
-  {
-    id: 'pan-2',
-    category: 'pantry',
-    title: 'Extra Virgin Olive Oil',
-    subtitle: 'Pantry Staples • 100ml remaining',
-    metadata: 'Low Stock • Refill needed',
-    url: '/pantry',
-    isFavorite: false,
-  },
-  {
-    id: 'pan-3',
-    category: 'pantry',
-    title: 'Whole Milk (Organic Valley)',
-    subtitle: 'Dairy & Eggs container • 1 Carton',
-    metadata: 'Expiring in 2 days',
-    url: '/pantry',
-    isFavorite: false,
-  },
-  {
-    id: 'pan-4',
-    category: 'pantry',
-    title: 'Fresh Baby Spinach',
-    subtitle: 'Produce container • 200g',
-    metadata: 'Fresh • 85% full',
-    url: '/pantry',
-    isFavorite: false,
-  },
-  {
-    id: 'pan-5',
-    category: 'pantry',
-    title: 'Organic Quinoa Grains',
-    subtitle: 'Dry Goods • 500g',
-    metadata: 'Shelf-stable • 12 months',
-    url: '/pantry',
-    isFavorite: false,
-  },
-
-  // Meal Plans
-  {
-    id: 'mp-1',
-    category: 'meal_plans',
-    title: 'Weekly High-Protein Mediterranean Plan',
-    subtitle: '7-day balanced meal plan focusing on lean proteins & whole grains',
-    metadata: '21 Meals • 2,100 kcal daily target',
-    url: '/meal-plans',
-    isFavorite: true,
-  },
-  {
-    id: 'mp-2',
-    category: 'meal_plans',
-    title: 'Zero-Waste Pantry Cleanout Plan',
-    subtitle: '3-day weekend plan utilizing items nearest to expiration date',
-    metadata: '9 Meals • 94% Pantry stock match',
-    url: '/meal-plans',
-    isFavorite: false,
-  },
-
-  // Shopping Lists
-  {
-    id: 'shop-1',
-    category: 'shopping',
-    title: 'Weekly Grocery Essentials List',
-    subtitle: '8 items pending purchase • Fresh produce & dairy',
-    metadata: '$38.50 estimated total',
-    url: '/shopping-list',
-    isFavorite: false,
-  },
-  {
-    id: 'shop-2',
-    category: 'shopping',
-    title: 'Specialty Indian Spices & Grains',
-    subtitle: 'Kasuri methi, garam masala, and basmati rice',
-    metadata: '3 items • High Priority',
-    url: '/shopping-list',
-    isFavorite: false,
-  },
-
-  // AI Recommendations & Studio
+const FALLBACK_SYSTEM_RESULTS = [
   {
     id: 'ai-1',
     category: 'ai',
-    title: 'AI Recipe Engine: Tuscan Salmon (96% Match)',
-    subtitle: 'Custom Gemini AI recommendation tailored to active spinach stock',
-    metadata: '15 mins cook time • 36g protein',
+    title: 'AI Recipe Recommendations',
+    subtitle: 'Personalized recipes matched to pantry inventory',
+    metadata: 'AI Intelligence',
     url: '/ai-recommendations',
-    isFavorite: true,
+    isFavorite: false,
   },
   {
     id: 'ai-2',
     category: 'ai',
     title: 'AI Kitchen Chat Assistant',
-    subtitle: 'Ask questions regarding ingredient substitutions and cooking tips',
-    metadata: 'Active AI Session',
+    subtitle: 'Ask culinary questions and get instant ingredient substitutions',
+    metadata: 'AI Studio',
     url: '/ai-chat',
     isFavorite: false,
   },
-
-  // Cooking Sessions
-  {
-    id: 'cook-1',
-    category: 'cooking',
-    title: 'Cooking Mode: Royal Butter Chicken',
-    subtitle: 'Step-by-step interactive cooking studio with live timer and checklists',
-    metadata: '8 Steps • Step 1 ready',
-    url: '/cooking/demo',
-    isFavorite: false,
-  },
-
-  // Notifications
-  {
-    id: 'notif-1',
-    category: 'notifications',
-    title: 'Whole Milk Expiring Soon Warning',
-    subtitle: 'Pantry best-by alert triggering in 2 days',
-    metadata: 'High Priority Alert',
-    url: '/notifications',
-    isFavorite: false,
-  },
-  {
-    id: 'notif-2',
-    category: 'notifications',
-    title: 'Olive Oil Low Stock Alert',
-    subtitle: 'Inventory below 250ml safety threshold',
-    metadata: 'Actionable Alert',
-    url: '/notifications',
-    isFavorite: false,
-  },
-
-  // Settings & System
   {
     id: 'set-1',
     category: 'settings',
-    title: 'AI Culinary Intelligence Preferences',
+    title: 'AI Culinary Preferences Tuning',
     subtitle: 'Configure diets, allergies, health goals, and budget targets',
-    metadata: 'Settings > AI Tuning',
+    metadata: 'Settings > AI',
     url: '/settings',
     isFavorite: false,
   },
@@ -201,35 +42,122 @@ const GLOBAL_SEARCH_INDEX = [
     id: 'set-3',
     category: 'settings',
     title: 'Chef Profile & Account Security',
-    subtitle: 'Change password, update bio, or export full kitchen JSON archive',
+    subtitle: 'Update profile details or change account password',
     metadata: 'Profile & Security',
     url: '/profile',
     isFavorite: false,
   },
 ];
 
-export const searchGlobal = async (query = '', filter = 'all') => {
+/**
+ * Unified multi-entity search across backend recipes, pantry inventory, meal plans, and shopping list
+ */
+export const searchGlobal = async (query = '', filter = 'all', pantryId = null) => {
   const q = query.toLowerCase().trim();
 
-  // Short delay to simulate API search responsiveness
-  await new Promise((r) => setTimeout(r, 120));
+  // 1. Fetch live entities from backend in parallel
+  const liveResults = [];
 
+  try {
+    const promises = [
+      api.get(RECIPES.LIST).catch(() => ({ data: { data: [] } })),
+      api.get(MEAL_PLANS.LIST).catch(() => ({ data: { data: [] } })),
+      api.get(SHOPPING.LIST).catch(() => ({ data: { data: [] } })),
+    ];
+
+    if (pantryId) {
+      promises.push(
+        api.get(PANTRY.ITEMS(pantryId)).catch(() => ({ data: { data: [] } }))
+      );
+    }
+
+    const [recipesRes, mealPlansRes, shoppingRes, pantryRes] = await Promise.allSettled(promises);
+
+    // Map Recipes
+    if (recipesRes.status === 'fulfilled') {
+      const recipes = recipesRes.value.data?.data?.recipes || recipesRes.value.data?.data || [];
+      recipes.forEach((r) => {
+        liveResults.push({
+          id: `rec-${r.id}`,
+          category: 'recipes',
+          title: r.title || r.name,
+          subtitle: r.description || `Cuisine: ${r.cuisine || 'General'}`,
+          metadata: `${(r.prepTime || 0) + (r.cookTime || 0)} mins • ${r.servings || 4} servings`,
+          url: `/recipes/${r.id}`,
+          isFavorite: Boolean(r.isFavorite),
+        });
+      });
+    }
+
+    // Map Meal Plans
+    if (mealPlansRes.status === 'fulfilled') {
+      const plans = mealPlansRes.value.data?.data?.mealPlans || mealPlansRes.value.data?.data || [];
+      plans.forEach((mp) => {
+        liveResults.push({
+          id: `mp-${mp.id}`,
+          category: 'meal_plans',
+          title: mp.name || mp.title || 'Weekly Meal Plan',
+          subtitle: mp.description || 'Structured weekly dining schedule',
+          metadata: `${mp.dishes?.length || 0} meals planned`,
+          url: `/meal-plans/${mp.id}`,
+          isFavorite: false,
+        });
+      });
+    }
+
+    // Map Shopping Lists
+    if (shoppingRes.status === 'fulfilled') {
+      const shopItems = shoppingRes.value.data?.data?.items || shoppingRes.value.data?.data || [];
+      shopItems.forEach((item) => {
+        liveResults.push({
+          id: `shop-${item.id}`,
+          category: 'shopping',
+          title: item.name || item.ingredientName,
+          subtitle: `Quantity: ${item.quantity || 1} ${item.unit || ''}`,
+          metadata: item.isPurchased ? 'Purchased' : 'Pending Purchase',
+          url: '/shopping-list',
+          isFavorite: false,
+        });
+      });
+    }
+
+    // Map Pantry Items
+    if (pantryRes && pantryRes.status === 'fulfilled') {
+      const pantryItems = pantryRes.value.data?.data?.items || pantryRes.value.data?.data || [];
+      pantryItems.forEach((item) => {
+        liveResults.push({
+          id: `pan-${item.id}`,
+          category: 'pantry',
+          title: item.name,
+          subtitle: `Stock: ${item.quantity} ${item.unit || ''} • Category: ${item.category || 'General'}`,
+          metadata: item.expiryDate ? `Expires: ${new Date(item.expiryDate).toLocaleDateString()}` : 'In Stock',
+          url: '/pantry',
+          isFavorite: false,
+        });
+      });
+    }
+  } catch (err) {
+    console.warn('Backend search aggregation partially failed; supplementing with index.', err);
+  }
+
+  // Combine live results with static system routes
+  const combined = [...liveResults, ...FALLBACK_SYSTEM_RESULTS];
+
+  // If no query and filter is all, return empty
   if (!q && filter === 'all') {
     return [];
   }
 
-  return GLOBAL_SEARCH_INDEX.filter((item) => {
-    // Category filtering
+  // Filter combined results
+  return combined.filter((item) => {
     if (filter === 'favorites' && !item.isFavorite) return false;
     if (filter === 'recipes' && item.category !== 'recipes') return false;
     if (filter === 'pantry' && item.category !== 'pantry') return false;
     if (filter === 'shopping' && item.category !== 'shopping') return false;
     if (filter === 'meal_plans' && item.category !== 'meal_plans') return false;
     if (filter === 'ai' && item.category !== 'ai') return false;
-    if (filter === 'notifications' && item.category !== 'notifications') return false;
     if (filter === 'settings' && item.category !== 'settings') return false;
 
-    // Query text match
     if (q) {
       const matchTitle = (item.title || '').toLowerCase().includes(q);
       const matchSubtitle = (item.subtitle || '').toLowerCase().includes(q);

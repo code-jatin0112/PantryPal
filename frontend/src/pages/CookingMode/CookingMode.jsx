@@ -12,6 +12,11 @@ import CompletionModal from '../../components/cooking/CompletionModal';
 import { DEFAULT_COOKING_RECIPE } from '../../components/cooking/cookingMockData';
 
 import { getRecipeById, getRecipeIngredients } from '../../services/recipeService';
+import {
+  startCookingSession,
+  updateCookingProgress,
+  completeCookingSession,
+} from '../../services/cookingService';
 import { useToast } from '../../context/ToastContext';
 
 const CookingMode = () => {
@@ -22,6 +27,7 @@ const CookingMode = () => {
   const [recipe, setRecipe] = useState(DEFAULT_COOKING_RECIPE);
   const [steps, setSteps] = useState(DEFAULT_COOKING_RECIPE.steps);
   const [ingredients, setIngredients] = useState(DEFAULT_COOKING_RECIPE.ingredients);
+  const [backendSessionId, setBackendSessionId] = useState(null);
 
   // Cooking state
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
@@ -43,23 +49,25 @@ const CookingMode = () => {
         if (Array.isArray(parsed.completedSteps)) setCompletedSteps(new Set(parsed.completedSteps));
         if (Array.isArray(parsed.checkedIngredients)) setCheckedIngredients(new Set(parsed.checkedIngredients));
         if (typeof parsed.notes === 'string') setNotes(parsed.notes);
+        if (parsed.backendSessionId) setBackendSessionId(parsed.backendSessionId);
       }
     } catch {
       // Ignore localStorage parse errors
     }
   }, [storageKey]);
 
-  // 2. Fetch recipe from backend if exists, otherwise fallback to realistic mock recipe
+  // 2. Fetch recipe from backend if exists & initialize backend session
   useEffect(() => {
     if (!recipeId || recipeId === 'demo' || recipeId === 'butter-chicken') {
       return;
     }
 
-    const fetchRecipe = async () => {
+    const initCooking = async () => {
       try {
-        const [recipeRes, ingRes] = await Promise.allSettled([
+        const [recipeRes, ingRes, sessionRes] = await Promise.allSettled([
           getRecipeById(recipeId),
           getRecipeIngredients(recipeId),
+          startCookingSession(recipeId),
         ]);
 
         if (recipeRes.status === 'fulfilled') {
@@ -101,15 +109,19 @@ const CookingMode = () => {
             setIngredients(ingList);
           }
         }
+
+        if (sessionRes.status === 'fulfilled' && sessionRes.value?.data?.id) {
+          setBackendSessionId(sessionRes.value.data.id);
+        }
       } catch {
         // Fallback gracefully to default rich recipe data
       }
     };
 
-    fetchRecipe();
+    initCooking();
   }, [recipeId]);
 
-  // 3. Save progress to localStorage
+  // 3. Save progress to localStorage and backend
   const saveProgress = useCallback(
     (stepIdx, compSteps, chkIngs, notesText) => {
       try {
@@ -118,14 +130,20 @@ const CookingMode = () => {
           completedSteps: Array.from(compSteps),
           checkedIngredients: Array.from(chkIngs),
           notes: notesText,
+          backendSessionId,
           updatedAt: new Date().toISOString(),
         };
         localStorage.setItem(storageKey, JSON.stringify(stateToSave));
-      } catch {
-        // LocalStorage quota or access error
-      }
+
+        if (backendSessionId) {
+          updateCookingProgress(backendSessionId, {
+            currentStep: stepIdx,
+            completedSteps: Array.from(compSteps),
+          }).catch(() => {});
+        }
+      } catch {}
     },
-    [storageKey]
+    [storageKey, backendSessionId]
   );
 
   // Toggle step complete
@@ -182,11 +200,16 @@ const CookingMode = () => {
   };
 
   // Finish Recipe
-  const handleFinishRecipe = () => {
+  const handleFinishRecipe = async () => {
     // Mark all steps complete
     const all = new Set(steps.map((_, i) => i));
     setCompletedSteps(all);
     saveProgress(currentStepIndex, all, checkedIngredients, notes);
+
+    if (backendSessionId) {
+      await completeCookingSession(backendSessionId).catch(() => {});
+    }
+
     setShowCompletionModal(true);
   };
 
