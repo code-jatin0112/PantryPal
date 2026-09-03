@@ -1,5 +1,5 @@
 import React from 'react';
-import { PackageCheck, CheckCircle2, AlertTriangle, DollarSign } from 'lucide-react';
+import { PackageCheck, CheckCircle2, AlertTriangle, IndianRupee } from 'lucide-react';
 import Badge from '../ui/Badge';
 
 const PantryCoverage = ({ evaluation = null, pantryName = 'My Pantry' }) => {
@@ -69,14 +69,14 @@ const PantryCoverage = ({ evaluation = null, pantryName = 'My Pantry' }) => {
       <div className="grid grid-cols-2 gap-3 pt-2">
         <div className="bg-[var(--color-parchment)] p-3 rounded-xl border border-[rgba(138,144,112,0.10)] flex items-center gap-3">
           <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center flex-shrink-0">
-            <DollarSign size={16} />
+            <IndianRupee size={16} />
           </div>
           <div>
             <span className="text-[11px] font-semibold text-[var(--color-sage)] uppercase block">
               Estimated Cost
             </span>
             <span className="text-base font-extrabold text-[var(--color-dark)] tabular-nums">
-              ${Number(estimatedCost).toFixed(2)}
+              ₹{Number(estimatedCost).toFixed(2)}
             </span>
           </div>
         </div>

@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import { Calendar, Users, DollarSign, Utensils, Edit2, Trash2 } from 'lucide-react';
+import { Calendar, Users, IndianRupee, Utensils, Edit2, Trash2 } from 'lucide-react';
 import Badge from '../ui/Badge';
 
 const MealPlanCard = ({
@@ -95,7 +95,7 @@ const MealPlanCard = ({
 
         {budget !== null ? (
           <span className="font-extrabold text-[var(--color-dark)] tabular-nums">
-            Budget: ${budget.toFixed(0)}
+            Budget: ₹{budget.toFixed(0)}
           </span>
         ) : (
           <span className="text-[var(--color-sage)] font-medium">Flexible</span>

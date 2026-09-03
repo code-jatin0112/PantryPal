@@ -158,12 +158,12 @@ const Recipes = () => {
     const validCookTimes = recipes.map((r) => (r.prepTime || 0) + (r.cookTime || 0)).filter((t) => t > 0);
     const avgCookTime = validCookTimes.length > 0
       ? Math.round(validCookTimes.reduce((a, b) => a + b, 0) / validCookTimes.length)
-      : 25;
+      : 0;
 
     const validCalories = recipes.map((r) => r.nutrition?.calories).filter((c) => c && c > 0);
     const avgCalories = validCalories.length > 0
       ? Math.round(validCalories.reduce((a, b) => a + b, 0) / validCalories.length)
-      : 480;
+      : 0;
 
     return { total, favCount, avgCookTime, avgCalories };
   }, [recipes, favorites]);

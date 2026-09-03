@@ -5,7 +5,7 @@ import {
   ArrowLeft,
   Calendar,
   Users,
-  DollarSign,
+  IndianRupee,
   Edit2,
   Trash2,
   Sparkles,
@@ -183,7 +183,7 @@ const MealPlanDetails = () => {
               Budget Target
             </span>
             <span className="text-lg font-extrabold text-[var(--color-dark)] tabular-nums">
-              {mealPlan.budget ? `$${Number(mealPlan.budget).toFixed(2)}` : 'Flexible'}
+              {mealPlan.budget ? `₹${Number(mealPlan.budget).toFixed(2)}` : 'Flexible'}
             </span>
           </div>
         </div>

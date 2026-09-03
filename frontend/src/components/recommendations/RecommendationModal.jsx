@@ -9,7 +9,7 @@ import {
   BookmarkPlus,
   Check,
   ChefHat,
-  DollarSign,
+  IndianRupee,
   PackageCheck,
 } from 'lucide-react';
 import Modal from '../ui/Modal';
@@ -128,7 +128,7 @@ const RecommendationModal = ({
           </div>
           <div className="bg-[var(--color-parchment)] p-2.5 rounded-xl">
             <span className="block text-[10px] uppercase">Est. Cost</span>
-            <strong className="text-[var(--color-dark)] font-bold">${Number(cost).toFixed(2)}</strong>
+            <strong className="text-[var(--color-dark)] font-bold">₹{Number(cost).toFixed(2)}</strong>
           </div>
           <div className="bg-[var(--color-parchment)] p-2.5 rounded-xl">
             <span className="block text-[10px] uppercase">Portions</span>

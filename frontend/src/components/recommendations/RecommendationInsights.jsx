@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import { Dumbbell, DollarSign, Zap, PackageCheck, HeartPulse } from 'lucide-react';
+import { Dumbbell, IndianRupee, Zap, PackageCheck, HeartPulse } from 'lucide-react';
 
 const RecommendationInsights = ({ recommendations = [], onSelectRecommendation }) => {
   if (!recommendations || recommendations.length === 0) return null;
@@ -40,9 +40,9 @@ const RecommendationInsights = ({ recommendations = [], onSelectRecommendation }
     },
     {
       title: 'Most Budget Friendly',
-      badge: `$${Number(mostBudget?.estimatedCost || 4.2).toFixed(2)} est.`,
+      badge: `₹${Number(mostBudget?.estimatedCost || 120).toFixed(0)} est.`,
       recipe: mostBudget,
-      icon: DollarSign,
+      icon: IndianRupee,
       color: 'text-emerald-600 bg-emerald-50 border-emerald-200',
     },
     {

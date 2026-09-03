@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, RefreshCw, Calendar, DollarSign, PackageCheck, Utensils } from 'lucide-react';
+import { Plus, RefreshCw, Calendar, IndianRupee, PackageCheck, Utensils } from 'lucide-react';
 
 import MealPlanCard from '../../components/mealPlans/MealPlanCard';
 import MealPlanTable from '../../components/mealPlans/MealPlanTable';
@@ -115,10 +115,10 @@ const MealPlans = () => {
             return acc + (ratio <= 1 ? ratio * 100 : ratio);
           }, 0) / evalList.length
         )
-      : 85;
+      : 0;
 
     const totalEstCost = evalList.reduce((acc, curr) => acc + (curr.estimatedCost || 0), 0);
-    const avgCost = evalList.length > 0 ? (totalEstCost / evalList.length).toFixed(0) : '45';
+    const avgCost = evalList.length > 0 ? (totalEstCost / evalList.length).toFixed(0) : '0';
 
     return { total, activePlans, avgCoverage, avgCost };
   }, [mealPlans, evaluations]);
@@ -205,9 +205,9 @@ const MealPlans = () => {
           description="Ingredients in stock"
         />
         <StatCard
-          icon={DollarSign}
+          icon={IndianRupee}
           title="Avg Grocery Cost"
-          value={`$${stats.avgCost}`}
+          value={`₹${stats.avgCost}`}
           description="Estimated restock cost"
         />
       </div>

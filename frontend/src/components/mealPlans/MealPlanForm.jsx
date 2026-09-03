@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useForm, useFieldArray } from 'react-hook-form';
 import { z } from 'zod';
-import { Plus, Trash2, Calendar, Utensils, Users, DollarSign } from 'lucide-react';
+import { Plus, Trash2, Calendar, Utensils, Users, IndianRupee } from 'lucide-react';
 import Button from '../ui/Button';
 import { getRecipes } from '../../services/recipeService';
 import { CUISINE_OPTIONS } from '../../constants/api';
@@ -158,7 +158,7 @@ const MealPlanForm = ({
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="space-y-1.5">
             <label className="block text-xs font-bold text-[var(--color-dark)] uppercase tracking-wider">
-              Estimated Budget ($)
+              Estimated Budget (₹)
             </label>
             <input
               type="number"

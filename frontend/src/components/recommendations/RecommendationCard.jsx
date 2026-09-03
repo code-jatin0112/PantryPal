@@ -11,7 +11,7 @@ import {
   Heart,
   Eye,
   Check,
-  DollarSign,
+  IndianRupee,
 } from 'lucide-react';
 import RecommendationScoreBadge from './RecommendationScoreBadge';
 import Badge from '../ui/Badge';
@@ -46,7 +46,7 @@ const RecommendationCard = ({
   const fat = recommendation.nutrition?.fat || 14;
 
   const budgetPriority = (recommendation.budgetPriority || 'medium').toLowerCase();
-  const budgetSigns = budgetPriority === 'high' ? '$$$' : budgetPriority === 'medium' ? '$$' : '$';
+  const budgetSigns = budgetPriority === 'high' ? '₹₹₹' : budgetPriority === 'medium' ? '₹₹' : '₹';
 
   const diffVariant =
     difficulty.toUpperCase() === 'EASY'
