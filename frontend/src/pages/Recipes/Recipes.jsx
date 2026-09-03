@@ -66,11 +66,13 @@ const Recipes = () => {
 
       const favList =
         favsRes.status === 'fulfilled'
-          ? favsRes.value.data.data?.recipes || favsRes.value.data.data || []
+          ? favsRes.value.data?.data?.favorites || favsRes.value.data?.data?.recipes || favsRes.value.data?.data || []
           : [];
 
+      const favIds = favList.map((r) => r.recipeId || r.recipe?.id || r.id).filter(Boolean);
+
       setRecipes(recipeList);
-      setFavorites(new Set(favList.map((r) => r.id)));
+      setFavorites(new Set(favIds));
     } catch (err) {
       toast(getErrorMessage(err) || 'Failed to load recipes.', 'error');
     } finally {
