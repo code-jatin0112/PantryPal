@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { ArrowLeft, BookPlus } from 'lucide-react';
 import RecipeForm from '../../components/recipes/RecipeForm';
-import { createRecipe, addRecipeIngredient, updateRecipeNutrition } from '../../services/recipeService';
+import { createRecipe } from '../../services/recipeService';
 import { useToast } from '../../context/ToastContext';
 import { getErrorMessage } from '../../utils/errorHandler';
 
@@ -15,38 +15,17 @@ const CreateRecipe = () => {
   const handleSubmit = async (formData) => {
     setSubmitting(true);
     try {
-      // 1. Create main recipe
-      const createRes = await createRecipe({
+      // Create recipe with ingredients and nutrition in one atomic transaction
+      await createRecipe({
         title: formData.title,
         description: formData.description,
         instructions: formData.instructions,
         prepTime: formData.prepTime,
         cookTime: formData.cookTime,
         servings: formData.servings,
+        ingredients: formData.ingredients,
+        nutrition: formData.nutrition,
       });
-
-      const newRecipe = createRes.data.data?.recipe || createRes.data.data;
-      const recipeId = newRecipe?.id;
-
-      if (recipeId) {
-        // 2. Add ingredients if provided
-        if (formData.ingredients && formData.ingredients.length > 0) {
-          await Promise.allSettled(
-            formData.ingredients.map((ing) =>
-              addRecipeIngredient(recipeId, {
-                name: ing.name,
-                quantity: ing.quantity,
-                unit: ing.unit,
-              })
-            )
-          );
-        }
-
-        // 3. Add nutrition if provided
-        if (formData.nutrition && (formData.nutrition.calories || formData.nutrition.protein)) {
-          await updateRecipeNutrition(recipeId, formData.nutrition).catch(() => {});
-        }
-      }
 
       toast(`"${formData.title}" created successfully! 🍳`, 'success');
       navigate('/recipes');

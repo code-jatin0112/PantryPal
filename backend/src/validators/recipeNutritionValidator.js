@@ -26,10 +26,12 @@ export const createRecipeNutritionValidation = [
     .withMessage("Fat must be 0 or greater"),
 
   body("fiber")
+    .optional()
     .isFloat({ min: 0 })
     .withMessage("Fiber must be 0 or greater"),
 
   body("sugar")
+    .optional()
     .isFloat({ min: 0 })
     .withMessage("Sugar must be 0 or greater"),
 ];

@@ -16,6 +16,8 @@ export const createRecipeController = async (req, res, next) => {
       prepTime: req.body.prepTime,
       cookTime: req.body.cookTime,
       servings: req.body.servings,
+      ingredients: req.body.ingredients,
+      nutrition: req.body.nutrition,
     });
 
     return res.status(201).json({
@@ -25,6 +27,15 @@ export const createRecipeController = async (req, res, next) => {
       },
     });
   } catch (error) {
+    if (error.code === "INVALID_INGREDIENT_DATA") {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: error.code,
+          message: error.message,
+        },
+      });
+    }
     next(error);
   }
 };
@@ -85,6 +96,8 @@ export const updateRecipeController = async (req, res, next) => {
       prepTime: req.body.prepTime,
       cookTime: req.body.cookTime,
       servings: req.body.servings,
+      ingredients: req.body.ingredients,
+      nutrition: req.body.nutrition,
     });
 
     if (!recipe) {
@@ -104,6 +117,15 @@ export const updateRecipeController = async (req, res, next) => {
       },
     });
   } catch (error) {
+    if (error.code === "INVALID_INGREDIENT_ID" || error.code === "INVALID_INGREDIENT_DATA") {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: error.code,
+          message: error.message,
+        },
+      });
+    }
     next(error);
   }
 };

@@ -8,9 +8,6 @@ import {
   updateRecipe,
   getRecipeIngredients,
   getRecipeNutrition,
-  addRecipeIngredient,
-  deleteRecipeIngredient,
-  updateRecipeNutrition,
 } from '../../services/recipeService';
 import { useToast } from '../../context/ToastContext';
 import { getErrorMessage } from '../../utils/errorHandler';
@@ -73,7 +70,7 @@ const EditRecipe = () => {
     if (!id) return;
     setSubmitting(true);
     try {
-      // 1. Update main recipe fields
+      // Atomically update recipe metadata, ingredients, and nutrition in one transaction
       await updateRecipe(id, {
         title: formData.title,
         description: formData.description,
@@ -81,12 +78,9 @@ const EditRecipe = () => {
         prepTime: formData.prepTime,
         cookTime: formData.cookTime,
         servings: formData.servings,
+        ingredients: formData.ingredients,
+        nutrition: formData.nutrition,
       });
-
-      // 2. Update nutrition if provided
-      if (formData.nutrition && (formData.nutrition.calories || formData.nutrition.protein)) {
-        await updateRecipeNutrition(id, formData.nutrition).catch(() => {});
-      }
 
       toast(`"${formData.title}" updated successfully!`, 'success');
       navigate(`/recipes/${id}`);
