@@ -48,6 +48,7 @@ const RecipeForm = ({
       difficulty: initialData?.difficulty || 'MEDIUM',
       ingredients: initialData?.ingredients && initialData.ingredients.length > 0
         ? initialData.ingredients.map((ing) => ({
+            id: ing.id || undefined,
             name: ing.name || '',
             quantity: ing.quantity !== undefined ? ing.quantity : 1,
             unit: ing.unit || 'pcs',
@@ -56,10 +57,10 @@ const RecipeForm = ({
             { name: '', quantity: 1, unit: 'pcs' },
             { name: '', quantity: 1, unit: 'pcs' },
           ],
-      calories: initialData?.nutrition?.calories || '',
-      protein: initialData?.nutrition?.protein || '',
-      carbs: initialData?.nutrition?.carbohydrates || '',
-      fat: initialData?.nutrition?.fat || '',
+      calories: initialData?.nutrition?.calories !== undefined ? initialData.nutrition.calories : '',
+      protein: initialData?.nutrition?.protein !== undefined ? initialData.nutrition.protein : '',
+      carbs: initialData?.nutrition?.carbohydrates !== undefined ? initialData.nutrition.carbohydrates : '',
+      fat: initialData?.nutrition?.fat !== undefined ? initialData.nutrition.fat : '',
     },
   });
 
@@ -101,6 +102,7 @@ const RecipeForm = ({
     const filteredIngredients = (data.ingredients || [])
       .filter((ing) => ing.name && ing.name.trim())
       .map((ing) => ({
+        id: ing.id || undefined,
         name: ing.name.trim(),
         quantity: parseFloat(ing.quantity) || 1,
         unit: ing.unit || 'pcs',
@@ -109,6 +111,34 @@ const RecipeForm = ({
     const formattedInstructions = instructions
       .filter((s) => s && s.trim())
       .join('\n');
+
+    const parseNutritionField = (val) => {
+      if (val === '' || val === null || val === undefined) return undefined;
+      const parsed = parseFloat(val);
+      return isNaN(parsed) ? undefined : parsed;
+    };
+
+    const calories = parseNutritionField(data.calories);
+    const protein = parseNutritionField(data.protein);
+    const carbohydrates = parseNutritionField(data.carbs);
+    const fat = parseNutritionField(data.fat);
+
+    const hasNutrition =
+      calories !== undefined ||
+      protein !== undefined ||
+      carbohydrates !== undefined ||
+      fat !== undefined;
+
+    const nutritionPayload = hasNutrition
+      ? {
+          calories: calories ?? 0,
+          protein: protein ?? 0,
+          carbohydrates: carbohydrates ?? 0,
+          fat: fat ?? 0,
+          fiber: 0,
+          sugar: 0,
+        }
+      : undefined;
 
     const payload = {
       title: data.title.trim(),
@@ -121,14 +151,7 @@ const RecipeForm = ({
       difficulty: data.difficulty || 'MEDIUM',
       instructions: formattedInstructions || 'Follow recipe directions.',
       ingredients: filteredIngredients,
-      nutrition: data.calories
-        ? {
-            calories: parseFloat(data.calories) || undefined,
-            protein: parseFloat(data.protein) || undefined,
-            carbohydrates: parseFloat(data.carbs) || undefined,
-            fat: parseFloat(data.fat) || undefined,
-          }
-        : undefined,
+      nutrition: nutritionPayload,
     };
 
     onSubmit(payload);
