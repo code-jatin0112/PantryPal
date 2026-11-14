@@ -15,17 +15,22 @@ import Button from '../../components/ui/Button';
 import { getRecipes, getRecipeById, getRecipeIngredients } from '../../services/recipeService';
 import {
   startCookingSession,
+  getActiveCookingSession,
   updateCookingProgress,
   completeCookingSession,
 } from '../../services/cookingService';
+import { usePantry } from '../../hooks/usePantry';
 import { useToast } from '../../context/ToastContext';
+import { getErrorMessage } from '../../utils/errorHandler';
 
 const CookingMode = () => {
   const { recipeId } = useParams();
   const navigate = useNavigate();
   const toast = useToast();
+  const { activePantry, refresh: refreshPantry } = usePantry();
 
   const [loading, setLoading] = useState(true);
+  const [completing, setCompleting] = useState(false);
   const [recipe, setRecipe] = useState(null);
   const [steps, setSteps] = useState([]);
   const [ingredients, setIngredients] = useState([]);
@@ -67,15 +72,15 @@ const CookingMode = () => {
           return;
         }
 
-        const [recipeRes, ingRes, sessionRes] = await Promise.allSettled([
+        const [recipeRes, ingRes] = await Promise.allSettled([
           getRecipeById(activeId),
           getRecipeIngredients(activeId),
-          startCookingSession(activeId),
         ]);
 
         if (isMounted) {
+          let rData = null;
           if (recipeRes.status === 'fulfilled') {
-            const rData = recipeRes.value.data.data?.recipe || recipeRes.value.data.data;
+            rData = recipeRes.value.data?.data?.recipe || recipeRes.value.data?.data;
             if (rData) {
               setRecipe(rData);
 
@@ -111,12 +116,43 @@ const CookingMode = () => {
           }
 
           if (ingRes.status === 'fulfilled') {
-            const ingList = ingRes.value.data.data?.ingredients || ingRes.value.data.data || [];
+            const ingList = ingRes.value.data?.data?.ingredients || ingRes.value.data?.data || [];
             setIngredients(ingList);
           }
 
-          if (sessionRes.status === 'fulfilled' && sessionRes.value?.data?.id) {
-            setBackendSessionId(sessionRes.value.data.id);
+          // Resume active cooking session or start a new one
+          let session = null;
+          try {
+            const activeRes = await getActiveCookingSession(activeId);
+            session = activeRes.data?.data?.session || activeRes.data?.session;
+          } catch {
+            // No active session or endpoint 404, proceed to start
+          }
+
+          if (!session) {
+            try {
+              const startRes = await startCookingSession(activeId, {
+                servings: rData?.servings || 4,
+              });
+              session = startRes.data?.data?.session || startRes.data?.session;
+            } catch (err) {
+              if (err.response?.status === 409 && err.response?.data?.data?.session) {
+                session = err.response.data.data.session;
+              }
+            }
+          }
+
+          if (session?.id) {
+            setBackendSessionId(session.id);
+            if (typeof session.currentStep === 'number' && session.currentStep >= 1) {
+              const uiStep = session.currentStep - 1;
+              setCurrentStepIndex(uiStep);
+              const prevCompleted = new Set();
+              for (let i = 0; i < uiStep; i++) {
+                prevCompleted.add(i);
+              }
+              setCompletedSteps(prevCompleted);
+            }
           }
         }
       } catch (err) {
@@ -162,10 +198,13 @@ const CookingMode = () => {
         localStorage.setItem(storageKey, JSON.stringify(stateToSave));
 
         if (backendSessionId) {
+          // Backend step index is 1-based (min: 1)
           updateCookingProgress(backendSessionId, {
-            currentStep: stepIdx,
+            currentStep: stepIdx + 1,
             completedSteps: Array.from(compSteps),
-          }).catch(() => {});
+          }).catch((err) => {
+            console.error('Failed to sync cooking progress:', err);
+          });
         }
       } catch {}
     },
@@ -229,14 +268,34 @@ const CookingMode = () => {
   };
 
   const handleFinishRecipe = async () => {
-    const allDone = new Set(Array.from({ length: steps.length }, (_, i) => i));
-    setCompletedSteps(allDone);
-    setShowCompletionModal(true);
+    if (!backendSessionId) {
+      toast('No active cooking session to complete.', 'error');
+      return;
+    }
 
-    if (backendSessionId) {
-      try {
-        await completeCookingSession(backendSessionId);
-      } catch {}
+    if (!activePantry?.id) {
+      toast('Please select or create a pantry to deduct ingredients from.', 'error');
+      return;
+    }
+
+    setCompleting(true);
+    try {
+      await completeCookingSession(backendSessionId, { pantryId: activePantry.id });
+
+      const allDone = new Set(Array.from({ length: steps.length }, (_, i) => i));
+      setCompletedSteps(allDone);
+      setShowCompletionModal(true);
+      localStorage.removeItem(storageKey);
+
+      if (refreshPantry) {
+        refreshPantry();
+      }
+      toast('Recipe completed! Pantry items have been deducted. 🍳', 'success');
+    } catch (err) {
+      const msg = getErrorMessage(err, 'Failed to complete cooking session.');
+      toast(msg, 'error');
+    } finally {
+      setCompleting(false);
     }
   };
 
@@ -347,6 +406,7 @@ const CookingMode = () => {
             onPrevious={handlePreviousStep}
             onNext={handleNextStep}
             onFinish={handleFinishRecipe}
+            finishLoading={completing}
           />
 
           {/* Bottom Notes Panel */}

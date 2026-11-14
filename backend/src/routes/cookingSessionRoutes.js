@@ -5,6 +5,7 @@ import { authenticate } from "../middleware/authMiddleware.js";
 import {
   startSession,
   getSession,
+  getActiveSession,
   updateProgress,
 } from "../controllers/cookingSessionController.js";
 
@@ -16,6 +17,7 @@ import {
   startCookingSessionValidation,
   cookingSessionIdValidation,
   updateCookingProgressValidation,
+  recipeIdParamValidation,
 } from "../validators/cookingSessionValidator.js";
 
 import { handleValidationErrors } from "../validators/authValidator.js";
@@ -32,6 +34,14 @@ router.post(
   startCookingSessionValidation,
   handleValidationErrors,
   startSession
+);
+
+router.get(
+  "/recipes/:recipeId/cooking-sessions/active",
+  authenticate,
+  recipeIdParamValidation,
+  handleValidationErrors,
+  getActiveSession
 );
 
 router.get(

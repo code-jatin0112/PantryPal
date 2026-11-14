@@ -6,62 +6,50 @@ import { COOKING } from '../constants/api';
  * POST /api/v1/recipes/:recipeId/cooking-sessions
  */
 export const startCookingSession = async (recipeId, payload = {}) => {
+  const servings = payload.servings ? Number(payload.servings) : 4;
+  const res = await api.post(COOKING.START(recipeId), { servings });
+  return res.data;
+};
+
+/**
+ * Fetch active cooking session for a recipe if one exists
+ * GET /api/v1/recipes/:recipeId/cooking-sessions/active
+ */
+export const getActiveCookingSession = async (recipeId) => {
   try {
-    const res = await api.post(COOKING.START(recipeId), payload);
+    const res = await api.get(COOKING.ACTIVE(recipeId));
     return res.data;
   } catch (err) {
-    console.warn('Backend cooking session start unavailable; continuing with local studio session.', err);
-    return {
-      success: true,
-      data: {
-        id: `local-session-${Date.now()}`,
-        recipeId,
-        currentStep: 0,
-        status: 'IN_PROGRESS',
-      },
-    };
+    return null;
   }
 };
 
 /**
- * Get cooking session status
+ * Get cooking session status by session ID
  * GET /api/v1/cooking-sessions/:sessionId
  */
 export const getCookingSession = async (sessionId) => {
-  try {
-    const res = await api.get(COOKING.SESSION(sessionId));
-    return res.data;
-  } catch (err) {
-    return null;
-  }
+  const res = await api.get(COOKING.SESSION(sessionId));
+  return res.data;
 };
 
 /**
- * Update step cooking progress
+ * Update step cooking progress (1-based currentStep)
  * PATCH /api/v1/cooking-sessions/:sessionId/progress
  */
-export const updateCookingProgress = async (sessionId, { currentStep, completedSteps = [] }) => {
-  try {
-    const res = await api.patch(COOKING.PROGRESS(sessionId), {
-      currentStep,
-      completedSteps,
-    });
-    return res.data;
-  } catch (err) {
-    return null;
-  }
+export const updateCookingProgress = async (sessionId, { currentStep }) => {
+  const step = Math.max(1, parseInt(currentStep, 10) || 1);
+  const res = await api.patch(COOKING.PROGRESS(sessionId), {
+    currentStep: step,
+  });
+  return res.data;
 };
 
 /**
- * Complete cooking session and deduct pantry stock if requested
+ * Complete cooking session and deduct pantry inventory
  * POST /api/v1/cooking-sessions/:sessionId/complete
  */
-export const completeCookingSession = async (sessionId, { deductPantry = true } = {}) => {
-  try {
-    const res = await api.post(COOKING.COMPLETE(sessionId), { deductPantry });
-    return res.data;
-  } catch (err) {
-    console.warn('Backend session completion unavailable.', err);
-    return { success: true };
-  }
+export const completeCookingSession = async (sessionId, { pantryId } = {}) => {
+  const res = await api.post(COOKING.COMPLETE(sessionId), { pantryId });
+  return res.data;
 };

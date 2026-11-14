@@ -50,14 +50,19 @@ export const startCookingSession = async ({
       recipeId,
       status: "active",
     },
+    include: {
+      recipe: true,
+    },
   });
 
   if (activeSession) {
-    throw new AppError(
+    const error = new AppError(
       "An active cooking session already exists for this recipe",
       409,
       "ACTIVE_COOKING_SESSION_EXISTS"
     );
+    error.session = activeSession;
+    throw error;
   }
 
   const totalSteps = recipe.instructions
@@ -151,6 +156,23 @@ export const updateCookingProgress = async ({
     },
     data: {
       currentStep,
+    },
+  });
+};
+
+export const getActiveCookingSession = async ({ userId, recipeId }) => {
+  return prisma.cookingSession.findFirst({
+    where: {
+      userId,
+      recipeId,
+      status: "active",
+    },
+    include: {
+      recipe: {
+        include: {
+          ingredients: true,
+        },
+      },
     },
   });
 };

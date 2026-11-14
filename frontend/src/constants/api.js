@@ -66,26 +66,29 @@ export const SHOPPING = {
 
 // ── Meal Plans ────────────────────────────────────────────
 export const MEAL_PLANS = {
-  LIST:       '/meal-plans',
-  CREATE:     '/meal-plans',
-  DETAIL:     (id) => `/meal-plans/${id}`,
-  UPDATE:     (id) => `/meal-plans/${id}`,
-  DELETE:     (id) => `/meal-plans/${id}`,
+  LIST:                 '/meal-plans',
+  CREATE:               '/meal-plans',
+  DETAIL:               (id) => `/meal-plans/${id}`,
+  UPDATE:               (id) => `/meal-plans/${id}`,
+  DELETE:               (id) => `/meal-plans/${id}`,
 
   // Dishes
-  DISHES:     (mealPlanId) => `/meal-plans/${mealPlanId}/dishes`,
-  DISH:       (mealPlanId, dishId) => `/meal-plans/${mealPlanId}/dishes/${dishId}`,
+  DISHES:               (mealPlanId) => `/meal-plans/${mealPlanId}/dishes`,
+  DISH:                 (mealPlanId, dishId) => `/meal-plans/${mealPlanId}/dishes/${dishId}`,
 
-  // Evaluation
-  EVALUATE:   (mealPlanId) => `/meal-plans/${mealPlanId}/evaluate`,
-  GROCERY:    (mealPlanId) => `/meal-plans/${mealPlanId}/grocery-requirements`,
+  // Evaluation & Grocery Requirements
+  EVALUATE:             (mealPlanId) => `/meal-plans/${mealPlanId}/evaluate`,
+  GROCERY:              (mealPlanId) => `/meal-plans/${mealPlanId}/grocery-requirements`,
+  GROCERY_REQUIREMENTS: (mealPlanId) => `/meal-plans/${mealPlanId}/grocery-requirements`,
 };
 
 // ── Cooking Sessions ──────────────────────────────────────
 export const COOKING = {
   START:      (recipeId) => `/recipes/${recipeId}/cooking-sessions`,
   ACTIVE:     (recipeId) => `/recipes/${recipeId}/cooking-sessions/active`,
-  COMPLETE:   (recipeId, sessionId) => `/recipes/${recipeId}/cooking-sessions/${sessionId}/complete`,
+  SESSION:    (sessionId) => `/cooking-sessions/${sessionId}`,
+  PROGRESS:   (sessionId) => `/cooking-sessions/${sessionId}/progress`,
+  COMPLETE:   (sessionId) => `/cooking-sessions/${sessionId}/complete`,
 };
 
 // ── AI ────────────────────────────────────────────────────
