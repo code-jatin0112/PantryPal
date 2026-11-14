@@ -28,7 +28,12 @@ const AddPantryItem = () => {
         unit: formData.unit,
         category: formData.category || undefined,
         expiryDate: formData.expiryDate ? new Date(formData.expiryDate).toISOString() : undefined,
-        minimumQuantity: formData.minimumQuantity || undefined,
+        purchaseDate: formData.purchaseDate ? new Date(formData.purchaseDate).toISOString() : undefined,
+        minimumQuantity:
+          formData.minimumQuantity !== undefined && formData.minimumQuantity !== ''
+            ? Number(formData.minimumQuantity)
+            : undefined,
+        notes: formData.notes || undefined,
       };
 
       await createPantryItem(activePantry.id, payload);

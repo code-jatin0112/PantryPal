@@ -27,6 +27,10 @@ export const createPantryItem = async ({
   quantity,
   unit,
   expiryDate,
+  category,
+  minimumQuantity,
+  purchaseDate,
+  notes,
 }) => {
   await verifyPantryOwnership({
     userId,
@@ -40,6 +44,15 @@ export const createPantryItem = async ({
       quantity,
       unit: unit.trim(),
       expiryDate: expiryDate ? new Date(expiryDate) : null,
+      category: category ? category.trim() : "Other",
+      minimumQuantity:
+        minimumQuantity !== undefined &&
+        minimumQuantity !== null &&
+        minimumQuantity !== ""
+          ? Number(minimumQuantity)
+          : null,
+      purchaseDate: purchaseDate ? new Date(purchaseDate) : null,
+      notes: notes ? notes.trim() : null,
     },
   });
 };
@@ -99,6 +112,10 @@ export const updatePantryItem = async ({
   quantity,
   unit,
   expiryDate,
+  category,
+  minimumQuantity,
+  purchaseDate,
+  notes,
 }) => {
   await verifyPantryOwnership({
     userId,
@@ -141,6 +158,25 @@ export const updatePantryItem = async ({
         expiryDate: expiryDate
           ? new Date(expiryDate)
           : null,
+      }),
+
+      ...(category !== undefined && {
+        category: category ? category.trim() : null,
+      }),
+
+      ...(minimumQuantity !== undefined && {
+        minimumQuantity:
+          minimumQuantity !== null ? Number(minimumQuantity) : null,
+      }),
+
+      ...(purchaseDate !== undefined && {
+        purchaseDate: purchaseDate
+          ? new Date(purchaseDate)
+          : null,
+      }),
+
+      ...(notes !== undefined && {
+        notes: notes ? notes.trim() : null,
       }),
     },
   });

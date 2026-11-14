@@ -74,4 +74,61 @@ describe('Pantry Module Test Suite', () => {
     render(<ExpiryBadge expiryDate={mockItem.expiryDate} />);
     expect(screen.getByText(/days/i)).toBeInTheDocument();
   });
+
+  it('renders low stock warning when quantity is at or below individual threshold', () => {
+    const lowStockItem = {
+      ...mockItem,
+      quantity: 1,
+      minimumQuantity: 2,
+    };
+
+    render(
+      <PantryCard
+        item={lowStockItem}
+        onAdjustStock={vi.fn()}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText(/Low Stock/i)).toBeInTheDocument();
+  });
+
+  it('does not render low stock warning when quantity is above individual threshold', () => {
+    const sufficientStockItem = {
+      ...mockItem,
+      quantity: 5,
+      minimumQuantity: 2,
+    };
+
+    render(
+      <PantryCard
+        item={sufficientStockItem}
+        onAdjustStock={vi.fn()}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByText(/Low Stock/i)).not.toBeInTheDocument();
+  });
+
+  it('renders low stock warning using fallback threshold of 5 when minimumQuantity is omitted', () => {
+    const omittedThresholdItem = {
+      ...mockItem,
+      quantity: 4,
+      minimumQuantity: null,
+    };
+
+    render(
+      <PantryCard
+        item={omittedThresholdItem}
+        onAdjustStock={vi.fn()}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText(/Low Stock/i)).toBeInTheDocument();
+  });
 });

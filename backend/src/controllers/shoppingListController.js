@@ -15,6 +15,8 @@ export const createShoppingListItemController = async (req, res, next) => {
       name: req.body.name,
       quantity: req.body.quantity,
       unit: req.body.unit,
+      category: req.body.category,
+      priority: req.body.priority,
     });
 
     if (!item) {
@@ -48,6 +50,8 @@ export const getShoppingListItemsController = async (req, res, next) => {
     const items = await getShoppingListItems({
       userId: req.user.id,
       isPurchased,
+      category: req.query.category,
+      priority: req.query.priority,
     });
 
     return res.status(200).json({
@@ -98,6 +102,8 @@ export const updateShoppingListItemController = async (req, res, next) => {
       quantity: req.body.quantity,
       unit: req.body.unit,
       isPurchased: req.body.isPurchased,
+      category: req.body.category,
+      priority: req.body.priority,
     });
 
     if (!item) {

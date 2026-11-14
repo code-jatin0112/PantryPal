@@ -66,4 +66,38 @@ describe('Recipes Module Test Suite', () => {
     fireEvent.click(favButton);
     expect(handleClick).toHaveBeenCalled();
   });
+
+  it('renders favorite button with active state and correct aria-label when favorited', () => {
+    render(<FavoriteButton isFavorite={true} onClick={vi.fn()} />);
+    const favButton = screen.getByRole('button', { name: /Remove from favorites/i });
+    expect(favButton).toBeInTheDocument();
+    expect(favButton).toHaveClass('text-red-500');
+  });
+
+  it('renders favorite button with inactive state and correct aria-label when not favorited', () => {
+    render(<FavoriteButton isFavorite={false} onClick={vi.fn()} />);
+    const favButton = screen.getByRole('button', { name: /Add to favorites/i });
+    expect(favButton).toBeInTheDocument();
+    expect(favButton).not.toHaveClass('text-red-500');
+  });
+
+  it('correctly extracts favorite status from backend API responses (isFavorited and isFavorite)', () => {
+    // Regression test: ensure { isFavorited: false } is NOT treated as truthy object
+    const parseFavoriteStatus = (resData) => {
+      return (
+        resData?.isFavorited ??
+        resData?.isFavorite ??
+        (typeof resData === 'boolean' ? resData : false)
+      );
+    };
+
+    expect(parseFavoriteStatus({ isFavorited: false })).toBe(false);
+    expect(parseFavoriteStatus({ isFavorited: true })).toBe(true);
+    expect(parseFavoriteStatus({ isFavorite: false })).toBe(false);
+    expect(parseFavoriteStatus({ isFavorite: true })).toBe(true);
+    expect(parseFavoriteStatus({ isFavorited: true, isFavorite: true })).toBe(true);
+    expect(parseFavoriteStatus({ isFavorited: false, isFavorite: false })).toBe(false);
+    expect(parseFavoriteStatus(null)).toBe(false);
+    expect(parseFavoriteStatus(undefined)).toBe(false);
+  });
 });

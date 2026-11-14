@@ -30,12 +30,9 @@ export const getLowStockPantryItems = async ({
     pantryId,
   });
 
-  return prisma.pantryItem.findMany({
+  const items = await prisma.pantryItem.findMany({
     where: {
       pantryId,
-      quantity: {
-        lte: threshold,
-      },
     },
     orderBy: [
       {
@@ -45,5 +42,13 @@ export const getLowStockPantryItems = async ({
         name: "asc",
       },
     ],
+  });
+
+  return items.filter((item) => {
+    const itemThreshold =
+      item.minimumQuantity !== null && item.minimumQuantity !== undefined
+        ? item.minimumQuantity
+        : threshold;
+    return item.quantity <= itemThreshold;
   });
 };

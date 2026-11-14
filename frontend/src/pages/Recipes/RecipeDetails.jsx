@@ -90,7 +90,9 @@ const RecipeDetails = () => {
 
       const favData =
         favStatusRes.status === 'fulfilled'
-          ? favStatusRes.value.data.data?.isFavorite || favStatusRes.value.data.data
+          ? (favStatusRes.value.data?.data?.isFavorited ??
+             favStatusRes.value.data?.data?.isFavorite ??
+             (typeof favStatusRes.value.data?.data === 'boolean' ? favStatusRes.value.data?.data : false))
           : false;
 
       if (recipeData) {

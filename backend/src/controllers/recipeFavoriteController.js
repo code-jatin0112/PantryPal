@@ -65,12 +65,22 @@ export const getFavoriteRecipesController = async (req, res, next) => {
 
 export const removeRecipeFavoriteController = async (req, res, next) => {
   try {
-    const deleted = await removeRecipeFavorite({
+    const result = await removeRecipeFavorite({
       userId: req.user.id,
       recipeId: req.params.recipeId,
     });
 
-    if (!deleted) {
+    if (result.type === "RECIPE_NOT_FOUND") {
+      return res.status(404).json({
+        success: false,
+        error: {
+          code: "RECIPE_NOT_FOUND",
+          message: "Recipe not found",
+        },
+      });
+    }
+
+    if (result.type === "FAVORITE_NOT_FOUND") {
       return res.status(404).json({
         success: false,
         error: {
@@ -88,15 +98,26 @@ export const removeRecipeFavoriteController = async (req, res, next) => {
 
 export const isRecipeFavoritedController = async (req, res, next) => {
   try {
-    const isFavorited = await isRecipeFavorited({
+    const result = await isRecipeFavorited({
       userId: req.user.id,
       recipeId: req.params.recipeId,
     });
 
+    if (result.type === "RECIPE_NOT_FOUND") {
+      return res.status(404).json({
+        success: false,
+        error: {
+          code: "RECIPE_NOT_FOUND",
+          message: "Recipe not found",
+        },
+      });
+    }
+
     return res.status(200).json({
       success: true,
       data: {
-        isFavorited,
+        isFavorited: result.data,
+        isFavorite: result.data,
       },
     });
   } catch (error) {

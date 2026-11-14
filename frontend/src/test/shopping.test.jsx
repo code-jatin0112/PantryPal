@@ -60,4 +60,42 @@ describe('Shopping List Module Test Suite', () => {
     expect(screen.getByText('6')).toBeInTheDocument();
     expect(screen.getByText('2')).toBeInTheDocument();
   });
+
+  it('renders priority badges with distinct variants', () => {
+    const { rerender } = render(
+      <ShoppingCard
+        item={{ ...mockItem, priority: 'HIGH' }}
+        onTogglePurchased={vi.fn()}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+      />
+    );
+    expect(screen.getByText('HIGH')).toBeInTheDocument();
+
+    rerender(
+      <ShoppingCard
+        item={{ ...mockItem, priority: 'LOW' }}
+        onTogglePurchased={vi.fn()}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+      />
+    );
+    expect(screen.getByText('LOW')).toBeInTheDocument();
+  });
+
+  it('filters and counts high priority items accurately', () => {
+    const items = [
+      { id: '1', name: 'Eggs', isPurchased: false, priority: 'HIGH', category: 'Dairy' },
+      { id: '2', name: 'Milk', isPurchased: true, priority: 'HIGH', category: 'Dairy' },
+      { id: '3', name: 'Bread', isPurchased: false, priority: 'MEDIUM', category: 'Bakery' },
+      { id: '4', name: 'Apples', isPurchased: false, priority: 'LOW', category: 'Produce' },
+    ];
+
+    const unpurchasedHigh = items.filter((i) => !i.isPurchased && i.priority === 'HIGH');
+    expect(unpurchasedHigh).toHaveLength(1);
+    expect(unpurchasedHigh[0].name).toBe('Eggs');
+
+    const dairyItems = items.filter((i) => i.category === 'Dairy');
+    expect(dairyItems).toHaveLength(2);
+  });
 });

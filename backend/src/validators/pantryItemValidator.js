@@ -43,6 +43,28 @@ export const createPantryItemValidation = [
     .optional({ nullable: true })
     .isISO8601()
     .withMessage("Expiry date must be a valid date"),
+
+  body("category")
+    .optional({ nullable: true })
+    .trim()
+    .isLength({ max: 50 })
+    .withMessage("Category must not exceed 50 characters"),
+
+  body("minimumQuantity")
+    .optional({ nullable: true })
+    .isFloat({ min: 0 })
+    .withMessage("Minimum quantity must be a non-negative number"),
+
+  body("purchaseDate")
+    .optional({ nullable: true })
+    .isISO8601()
+    .withMessage("Purchase date must be a valid date"),
+
+  body("notes")
+    .optional({ nullable: true })
+    .trim()
+    .isLength({ max: 1000 })
+    .withMessage("Notes must not exceed 1000 characters"),
 ];
 
 export const updatePantryItemValidation = [
@@ -79,6 +101,28 @@ export const updatePantryItemValidation = [
     .optional({ nullable: true })
     .isISO8601()
     .withMessage("Expiry date must be a valid date"),
+
+  body("category")
+    .optional({ nullable: true })
+    .trim()
+    .isLength({ max: 50 })
+    .withMessage("Category must not exceed 50 characters"),
+
+  body("minimumQuantity")
+    .optional({ nullable: true })
+    .isFloat({ min: 0 })
+    .withMessage("Minimum quantity must be a non-negative number"),
+
+  body("purchaseDate")
+    .optional({ nullable: true })
+    .isISO8601()
+    .withMessage("Purchase date must be a valid date"),
+
+  body("notes")
+    .optional({ nullable: true })
+    .trim()
+    .isLength({ max: 1000 })
+    .withMessage("Notes must not exceed 1000 characters"),
 ];
 
 export const adjustPantryItemValidation = [

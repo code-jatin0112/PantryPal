@@ -2,21 +2,28 @@ import "dotenv/config";
 import { GoogleGenAI } from "@google/genai";
 import AppError from "../utils/AppError.js";
 
-const apiKey = process.env.LLM_API_KEY;
-const model = process.env.LLM_MODEL;
-const timeout = Number(process.env.LLM_TIMEOUT || 30000);
+const getAIClientAndConfig = () => {
+  const apiKey = process.env.LLM_API_KEY;
+  const model = process.env.LLM_MODEL;
+  const timeout = Number(process.env.LLM_TIMEOUT || 30000);
 
-if (!apiKey) {
-  throw new Error("LLM_API_KEY is not configured");
-}
+  if (!apiKey || !model) {
+    const missing = [];
+    if (!apiKey) missing.push("LLM_API_KEY");
+    if (!model) missing.push("LLM_MODEL");
+    throw new AppError(
+      `AI service is not configured: missing ${missing.join(", ")}`,
+      503,
+      "AI_CONFIG_ERROR"
+    );
+  }
 
-if (!model) {
-  throw new Error("LLM_MODEL is not configured");
-}
+  const ai = new GoogleGenAI({
+    apiKey,
+  });
 
-const ai = new GoogleGenAI({
-  apiKey,
-});
+  return { ai, model, timeout };
+};
 
 const executeAIRequest = async ({
   systemInstruction,
@@ -24,6 +31,8 @@ const executeAIRequest = async ({
   responseMimeType = "text/plain",
   responseSchema,
 }) => {
+  const { ai, model, timeout } = getAIClientAndConfig();
+
   const controller = new AbortController();
 
   const timeoutId = setTimeout(() => {
@@ -52,6 +61,10 @@ const executeAIRequest = async ({
         504,
         "AI_SERVICE_TIMEOUT"
       );
+    }
+
+    if (error instanceof AppError) {
+      throw error;
     }
 
     console.error("AI service error:", error);

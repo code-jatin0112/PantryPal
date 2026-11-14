@@ -96,7 +96,7 @@ const PantryCard = ({
       <div className="space-y-2 pt-2 border-t border-[rgba(138,144,112,0.10)] mt-2 text-xs text-[var(--color-sage)]">
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <ExpiryBadge expiryDate={expiryDate} size="sm" />
-          <StockBadge quantity={item.quantity} minStock={item.minimumQuantity || 1} size="sm" />
+          <StockBadge quantity={item.quantity} minStock={item.minimumQuantity ?? 5} size="sm" />
         </div>
 
         {purchaseDate && (
