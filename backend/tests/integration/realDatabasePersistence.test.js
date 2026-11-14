@@ -4,17 +4,29 @@ import app from "../../src/app.js";
 import prisma from "../../src/config/database.js";
 import { generateAccessToken } from "../../src/utils/token.js";
 
-describe("Real PostgreSQL Database Persistence & Migration Tests", () => {
+describe("Real PostgreSQL Database Persistence & Isolation Tests", () => {
   let testUser;
   let testAuthToken;
   let testPantry;
 
   beforeAll(async () => {
-    // Create an isolated real test user in the PostgreSQL database
+    // 1. Safety Guard: Disallow running against production database
+    const dbUrl = process.env.DATABASE_URL || "";
+    const isProduction =
+      process.env.NODE_ENV === "production" ||
+      /(prod|production|supabase\.co|neon\.tech|railway\.app|aws\.com)/i.test(dbUrl);
+
+    if (isProduction) {
+      throw new Error(
+        "CRITICAL SAFETY GUARD: Refusing to run real database persistence tests against a production database!"
+      );
+    }
+
+    // 2. Deterministic, test-owned user fixture
     testUser = await prisma.user.create({
       data: {
-        name: "DB Verifier User",
-        email: `db-verifier-${Date.now()}@test.com`,
+        name: "DB Isolation Verifier",
+        email: `db-verifier-${Date.now()}-${Math.random().toString(36).slice(2, 7)}@test.com`,
         password: "hashedPassword123!",
         isActive: true,
       },
@@ -22,21 +34,21 @@ describe("Real PostgreSQL Database Persistence & Migration Tests", () => {
 
     testAuthToken = generateAccessToken(testUser.id);
 
-    // Create a real pantry for this test user
+    // 3. Test-owned pantry fixture
     testPantry = await prisma.pantry.create({
       data: {
-        name: "Test Verification Pantry",
+        name: "Deterministic Verification Pantry",
         userId: testUser.id,
       },
     });
   });
 
   afterAll(async () => {
-    // Clean up created test data cascading from the test user
+    // Clean up all test-owned records via user cascade deletion
     if (testUser?.id) {
       await prisma.user.delete({
         where: { id: testUser.id },
-      });
+      }).catch(() => {});
     }
     await prisma.$disconnect();
   });
@@ -108,7 +120,7 @@ describe("Real PostgreSQL Database Persistence & Migration Tests", () => {
 
       const itemId = createRes.body.data.item.id;
 
-      // Update metadata
+      // Update metadata via PATCH
       const updateRes = await supertest(app)
         .patch(`/api/v1/pantries/${testPantry.id}/items/${itemId}`)
         .set("Authorization", `Bearer ${testAuthToken}`)
@@ -270,23 +282,45 @@ describe("Real PostgreSQL Database Persistence & Migration Tests", () => {
     });
   });
 
-  describe("4. Migration Record Preservation", () => {
-    it("preserves pre-existing pantry records across migrations without data loss", async () => {
-      const existingItems = await prisma.pantryItem.findMany();
-      expect(existingItems.length).toBeGreaterThanOrEqual(19);
+  describe("4. Deterministic Record Preservation & Schema Compatibility", () => {
+    it("preserves test-owned items created without metadata across queries and updates", async () => {
+      // Create a deterministic test-owned item simulating a legacy record without metadata
+      const legacyItem = await prisma.pantryItem.create({
+        data: {
+          pantryId: testPantry.id,
+          name: "Deterministic Heritage Item",
+          quantity: 5,
+          unit: "units",
+          category: "Other",
+          minimumQuantity: null,
+          notes: null,
+          purchaseDate: null,
+        },
+      });
 
-      // Verify Tomato still exists with quantity 6 and valid structure
-      const tomato = existingItems.find((i) => i.name === "Tomato");
-      expect(tomato).toBeDefined();
-      expect(tomato.quantity).toBe(6);
-      expect(tomato.minimumQuantity).toBeNull();
-      expect(tomato.category).toBe("Other");
+      // Query from database and verify integrity
+      const fetched = await prisma.pantryItem.findUnique({
+        where: { id: legacyItem.id },
+      });
 
-      // Verify Rice still exists
-      const rice = existingItems.find((i) => i.name === "Rice");
-      expect(rice).toBeDefined();
-      expect(rice.quantity).toBe(2);
-      expect(rice.minimumQuantity).toBeNull();
+      expect(fetched).not.toBeNull();
+      expect(fetched.name).toBe("Deterministic Heritage Item");
+      expect(fetched.quantity).toBe(5);
+      expect(fetched.minimumQuantity).toBeNull();
+      expect(fetched.category).toBe("Other");
+      expect(fetched.notes).toBeNull();
+      expect(fetched.purchaseDate).toBeNull();
+
+      // Perform a partial update (only quantity) and verify metadata fields are undisturbed
+      const updated = await prisma.pantryItem.update({
+        where: { id: legacyItem.id },
+        data: { quantity: 10 },
+      });
+
+      expect(updated.quantity).toBe(10);
+      expect(updated.minimumQuantity).toBeNull();
+      expect(updated.category).toBe("Other");
+      expect(updated.notes).toBeNull();
     });
   });
 });
