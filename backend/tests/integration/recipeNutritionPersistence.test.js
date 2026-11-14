@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import supertest from "supertest";
+import { randomUUID } from "crypto";
 import app from "../../src/app.js";
 import prisma from "../../src/config/database.js";
 import { generateAccessToken } from "../../src/utils/token.js";
@@ -229,28 +230,56 @@ describe("Recipe Editing, Ingredients & Nutrition Atomic Persistence Tests (Phas
     expect(new Date(afterDb.createdAt).toISOString()).toBe(new Date(beforeDb.createdAt).toISOString());
   });
 
-  // ── 7. Handling Zero Nutrition Values ─────────────────────────
-  it("7. preserves legitimate zero nutrition values on update", async () => {
+  // ── 7. Nutrition Field Preservation & Zero Values ─────────────
+  it("7. preserves existing fiber and sugar when only updating calories, and supports legitimate zero values", async () => {
+    // Recipe currently has nutrition from creation: calories 450, fiber 4, sugar 3
+    // Update only calories to 500 via atomic recipe update (omitting fiber & sugar)
+    const partialNutRes = await supertest(app)
+      .patch(`/api/v1/recipes/${createdRecipeId}`)
+      .set("Authorization", `Bearer ${user1Token}`)
+      .send({
+        nutrition: {
+          calories: 500,
+        },
+      });
+
+    expect(partialNutRes.status).toBe(200);
+    expect(partialNutRes.body.data.recipe.nutrition.calories).toBe(500);
+    expect(partialNutRes.body.data.recipe.nutrition.fiber).toBe(4);
+    expect(partialNutRes.body.data.recipe.nutrition.sugar).toBe(3);
+
+    // Verify in PostgreSQL that existing fiber and sugar were NOT erased
+    let dbNutrition = await prisma.recipeNutrition.findUnique({
+      where: { recipeId: createdRecipeId },
+    });
+    expect(dbNutrition.calories).toBe(500);
+    expect(dbNutrition.fiber).toBe(4);
+    expect(dbNutrition.sugar).toBe(3);
+
+    // Now update fiber and sugar to legitimate 0 values
     const zeroRes = await supertest(app)
       .patch(`/api/v1/recipes/${createdRecipeId}/nutrition`)
       .set("Authorization", `Bearer ${user1Token}`)
       .send({
         calories: 0,
         fat: 0,
+        fiber: 0,
         sugar: 0,
       });
 
     expect(zeroRes.status).toBe(200);
     expect(zeroRes.body.data.nutrition.calories).toBe(0);
     expect(zeroRes.body.data.nutrition.fat).toBe(0);
+    expect(zeroRes.body.data.nutrition.fiber).toBe(0);
     expect(zeroRes.body.data.nutrition.sugar).toBe(0);
 
-    // Verify in PostgreSQL
-    const dbNutrition = await prisma.recipeNutrition.findUnique({
+    // Verify in PostgreSQL that 0 was persisted
+    dbNutrition = await prisma.recipeNutrition.findUnique({
       where: { recipeId: createdRecipeId },
     });
     expect(dbNutrition.calories).toBe(0);
     expect(dbNutrition.fat).toBe(0);
+    expect(dbNutrition.fiber).toBe(0);
     expect(dbNutrition.sugar).toBe(0);
   });
 
@@ -295,35 +324,111 @@ describe("Recipe Editing, Ingredients & Nutrition Atomic Persistence Tests (Phas
     await prisma.recipe.delete({ where: { id: user2Recipe.id } });
   });
 
-  // ── 9. Rolling Back Failed Atomic Mutations ────────────────────
-  it("9. rolls back entire transaction if any part of atomic update fails", async () => {
+  // ── 9. Real Database Transaction Rollback Test ───────────────────
+  it("9. executes initial mutation in transaction, fails during ingredient reconciliation, and rolls back all changes", async () => {
     const beforeRecipe = await prisma.recipe.findUnique({
       where: { id: createdRecipeId },
       include: { ingredients: true, nutrition: true },
     });
 
-    // Attempt update with valid title change BUT invalid ingredient quantity (-10)
+    // Provide a valid UUID that passes HTTP validation but does NOT belong to this recipe.
+    // This allows the request to pass express-validator, enter the Prisma transaction,
+    // execute the initial scalar update (title -> 'This Title Must Be Rolled Back'),
+    // and then fail inside the transaction during ingredient reconciliation.
+    const foreignUUID = randomUUID();
+
     const failRes = await supertest(app)
       .patch(`/api/v1/recipes/${createdRecipeId}`)
       .set("Authorization", `Bearer ${user1Token}`)
       .send({
-        title: "This Title Should Not Persist",
+        title: "This Title Must Be Rolled Back",
         ingredients: [
-          { id: ingredientAId, name: "Whole Wheat Penne", quantity: -10, unit: "grams" },
+          { id: ingredientAId, name: "Whole Wheat Penne", quantity: 300, unit: "grams" },
+          { id: foreignUUID, name: "Foreign Ingredient", quantity: 100, unit: "grams" },
         ],
       });
 
     expect(failRes.status).toBe(400);
+    expect(failRes.body.error.code).toBe("INVALID_INGREDIENT_ID");
 
-    // Verify in PostgreSQL that title was NOT changed
+    // Verify in real PostgreSQL database that the initial mutation was ROLLED BACK
     const afterRecipe = await prisma.recipe.findUnique({
       where: { id: createdRecipeId },
+      include: { ingredients: true, nutrition: true },
     });
+
+    // 1. Recipe title was rolled back to previous value
     expect(afterRecipe.title).toBe(beforeRecipe.title);
+    expect(afterRecipe.title).not.toBe("This Title Must Be Rolled Back");
+
+    // 2. Ingredients remain unchanged (quantity was NOT updated to 300, foreign ingredient was NOT added)
+    expect(afterRecipe.ingredients).toHaveLength(beforeRecipe.ingredients.length);
+    const ingA = afterRecipe.ingredients.find((i) => i.id === ingredientAId);
+    expect(ingA.quantity).toBe(250);
+
+    // 3. Nutrition remains unchanged
+    expect(afterRecipe.nutrition.calories).toBe(beforeRecipe.nutrition.calories);
   });
 
-  // ── 10. Reload and PostgreSQL Persistence ──────────────────────
-  it("10. reloads recipe and verifies complete PostgreSQL persistence", async () => {
+  // ── 10. Ingredient Validation & Incomplete Payloads ────────────
+  it("10. validates ingredient data, rejects incomplete payloads, and allows metadata-only updates", async () => {
+    // Missing name
+    const missingNameRes = await supertest(app)
+      .patch(`/api/v1/recipes/${createdRecipeId}`)
+      .set("Authorization", `Bearer ${user1Token}`)
+      .send({
+        ingredients: [{ quantity: 100, unit: "g" }],
+      });
+    expect(missingNameRes.status).toBe(400);
+
+    // Missing quantity
+    const missingQtyRes = await supertest(app)
+      .patch(`/api/v1/recipes/${createdRecipeId}`)
+      .set("Authorization", `Bearer ${user1Token}`)
+      .send({
+        ingredients: [{ name: "Garlic", unit: "cloves" }],
+      });
+    expect(missingQtyRes.status).toBe(400);
+
+    // Missing unit
+    const missingUnitRes = await supertest(app)
+      .patch(`/api/v1/recipes/${createdRecipeId}`)
+      .set("Authorization", `Bearer ${user1Token}`)
+      .send({
+        ingredients: [{ name: "Garlic", quantity: 2 }],
+      });
+    expect(missingUnitRes.status).toBe(400);
+
+    // Zero / negative quantity
+    const invalidQtyRes = await supertest(app)
+      .patch(`/api/v1/recipes/${createdRecipeId}`)
+      .set("Authorization", `Bearer ${user1Token}`)
+      .send({
+        ingredients: [{ name: "Garlic", quantity: 0, unit: "cloves" }],
+      });
+    expect(invalidQtyRes.status).toBe(400);
+
+    // Metadata-only update: omitting ingredients array succeeds and preserves ingredients
+    const metaRes = await supertest(app)
+      .patch(`/api/v1/recipes/${createdRecipeId}`)
+      .set("Authorization", `Bearer ${user1Token}`)
+      .send({
+        description: "Updated description metadata only",
+      });
+    expect(metaRes.status).toBe(200);
+    expect(metaRes.body.data.recipe.description).toBe("Updated description metadata only");
+
+    // Verify ingredients were preserved in PostgreSQL
+    const dbRecipe = await prisma.recipe.findUnique({
+      where: { id: createdRecipeId },
+      include: { ingredients: true },
+    });
+    expect(dbRecipe.ingredients).toHaveLength(1);
+    expect(dbRecipe.ingredients[0].id).toBe(ingredientAId);
+  });
+
+  // ── 11. Reload and PostgreSQL Persistence ──────────────────────
+  it("11. reloads recipe and verifies complete PostgreSQL persistence", async () => {
     const getRes = await supertest(app)
       .get(`/api/v1/recipes/${createdRecipeId}`)
       .set("Authorization", `Bearer ${user1Token}`);

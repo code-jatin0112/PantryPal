@@ -27,6 +27,15 @@ export const createRecipeController = async (req, res, next) => {
       },
     });
   } catch (error) {
+    if (error.code === "INVALID_INGREDIENT_DATA") {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: error.code,
+          message: error.message,
+        },
+      });
+    }
     next(error);
   }
 };
@@ -108,7 +117,7 @@ export const updateRecipeController = async (req, res, next) => {
       },
     });
   } catch (error) {
-    if (error.code === "INVALID_INGREDIENT_ID") {
+    if (error.code === "INVALID_INGREDIENT_ID" || error.code === "INVALID_INGREDIENT_DATA") {
       return res.status(400).json({
         success: false,
         error: {

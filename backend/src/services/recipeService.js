@@ -26,12 +26,31 @@ export const createRecipe = async ({
 
     if (ingredients && Array.isArray(ingredients) && ingredients.length > 0) {
       for (const ing of ingredients) {
+        if (
+          !ing ||
+          !ing.name ||
+          typeof ing.name !== "string" ||
+          !ing.name.trim() ||
+          ing.quantity === undefined ||
+          ing.quantity === null ||
+          isNaN(Number(ing.quantity)) ||
+          Number(ing.quantity) <= 0 ||
+          !ing.unit ||
+          typeof ing.unit !== "string" ||
+          !ing.unit.trim()
+        ) {
+          const err = new Error("Each ingredient must have a valid name, quantity > 0, and unit");
+          err.statusCode = 400;
+          err.code = "INVALID_INGREDIENT_DATA";
+          throw err;
+        }
+
         await tx.recipeIngredient.create({
           data: {
             recipeId: recipe.id,
-            name: ing.name,
-            quantity: ing.quantity,
-            unit: ing.unit,
+            name: ing.name.trim(),
+            quantity: Number(ing.quantity),
+            unit: ing.unit.trim(),
           },
         });
       }
@@ -138,12 +157,31 @@ export const updateRecipe = async ({
       });
       const currentMap = new Map(currentIngredients.map((i) => [i.id, i]));
 
-      // Verify that any provided ingredient ID belongs to this recipe
+      // Verify that any provided ingredient ID belongs to this recipe and all items have valid data
       for (const ing of ingredients) {
         if (ing.id && !currentMap.has(ing.id)) {
           const err = new Error(`Ingredient with id ${ing.id} does not belong to this recipe`);
           err.statusCode = 400;
           err.code = "INVALID_INGREDIENT_ID";
+          throw err;
+        }
+
+        if (
+          !ing ||
+          !ing.name ||
+          typeof ing.name !== "string" ||
+          !ing.name.trim() ||
+          ing.quantity === undefined ||
+          ing.quantity === null ||
+          isNaN(Number(ing.quantity)) ||
+          Number(ing.quantity) <= 0 ||
+          !ing.unit ||
+          typeof ing.unit !== "string" ||
+          !ing.unit.trim()
+        ) {
+          const err = new Error("Each ingredient must have a valid name, quantity > 0, and unit");
+          err.statusCode = 400;
+          err.code = "INVALID_INGREDIENT_DATA";
           throw err;
         }
       }
@@ -163,31 +201,35 @@ export const updateRecipe = async ({
 
       // Add new ingredients and update modified existing ingredients
       for (const ing of ingredients) {
+        const cleanName = ing.name.trim();
+        const cleanQty = Number(ing.quantity);
+        const cleanUnit = ing.unit.trim();
+
         if (!ing.id) {
           // New ingredient: create
           await tx.recipeIngredient.create({
             data: {
               recipeId,
-              name: ing.name,
-              quantity: ing.quantity,
-              unit: ing.unit,
+              name: cleanName,
+              quantity: cleanQty,
+              unit: cleanUnit,
             },
           });
         } else {
           // Existing ingredient: only update if changed to preserve unchanged record state
           const current = currentMap.get(ing.id);
           const hasChanged =
-            current.name !== ing.name ||
-            current.quantity !== ing.quantity ||
-            current.unit !== ing.unit;
+            current.name !== cleanName ||
+            current.quantity !== cleanQty ||
+            current.unit !== cleanUnit;
 
           if (hasChanged) {
             await tx.recipeIngredient.update({
               where: { id: ing.id },
               data: {
-                name: ing.name,
-                quantity: ing.quantity,
-                unit: ing.unit,
+                name: cleanName,
+                quantity: cleanQty,
+                unit: cleanUnit,
               },
             });
           }

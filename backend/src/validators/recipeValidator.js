@@ -51,7 +51,6 @@ export const createRecipeValidation = [
     .withMessage("Ingredient ID must be a valid UUID"),
 
   body("ingredients.*.name")
-    .optional({ nullable: false })
     .trim()
     .notEmpty()
     .withMessage("Ingredient name is required")
@@ -59,12 +58,12 @@ export const createRecipeValidation = [
     .withMessage("Ingredient name must not exceed 100 characters"),
 
   body("ingredients.*.quantity")
-    .optional({ nullable: false })
+    .exists({ checkNull: true })
+    .withMessage("Quantity is required")
     .isFloat({ gt: 0 })
     .withMessage("Quantity must be greater than 0"),
 
   body("ingredients.*.unit")
-    .optional({ nullable: false })
     .trim()
     .notEmpty()
     .withMessage("Unit is required")
@@ -158,7 +157,6 @@ export const updateRecipeValidation = [
     .withMessage("Ingredient ID must be a valid UUID"),
 
   body("ingredients.*.name")
-    .optional({ nullable: false })
     .trim()
     .notEmpty()
     .withMessage("Ingredient name is required")
@@ -166,12 +164,12 @@ export const updateRecipeValidation = [
     .withMessage("Ingredient name must not exceed 100 characters"),
 
   body("ingredients.*.quantity")
-    .optional({ nullable: false })
+    .exists({ checkNull: true })
+    .withMessage("Quantity is required")
     .isFloat({ gt: 0 })
     .withMessage("Quantity must be greater than 0"),
 
   body("ingredients.*.unit")
-    .optional({ nullable: false })
     .trim()
     .notEmpty()
     .withMessage("Unit is required")

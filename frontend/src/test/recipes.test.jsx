@@ -116,6 +116,8 @@ describe('Recipes Module Test Suite', () => {
         protein: 0,
         carbohydrates: 1,
         fat: 0,
+        fiber: 0,
+        sugar: 0,
       },
     };
 
@@ -137,8 +139,8 @@ describe('Recipes Module Test Suite', () => {
     expect(screen.getByDisplayValue('Water')).toBeInTheDocument();
 
     // Verify 0 values for nutrition are populated in inputs
-    const calorieInputs = screen.getAllByDisplayValue('0');
-    expect(calorieInputs.length).toBeGreaterThanOrEqual(1);
+    const zeroInputs = screen.getAllByDisplayValue('0');
+    expect(zeroInputs.length).toBeGreaterThanOrEqual(4);
 
     // Submit the form
     const submitBtn = screen.getByRole('button', { name: /Save Recipe/i });
@@ -159,5 +161,66 @@ describe('Recipes Module Test Suite', () => {
     expect(submittedPayload.nutrition.calories).toBe(0);
     expect(submittedPayload.nutrition.protein).toBe(0);
     expect(submittedPayload.nutrition.fat).toBe(0);
+    expect(submittedPayload.nutrition.fiber).toBe(0);
+    expect(submittedPayload.nutrition.sugar).toBe(0);
+  });
+
+  it('RecipeForm preserves existing fiber and sugar when only editing calories', async () => {
+    const initialData = {
+      id: 'rec-test-2',
+      title: 'Berry Smoothie',
+      instructions: 'Blend berries with oat milk.',
+      ingredients: [
+        { id: 'ing-uuid-berries', name: 'Mixed Berries', quantity: 150, unit: 'g' },
+      ],
+      nutrition: {
+        calories: 220,
+        protein: 4,
+        carbohydrates: 45,
+        fat: 2,
+        fiber: 7,
+        sugar: 28,
+      },
+    };
+
+    let submittedPayload = null;
+    const handleSubmit = (payload) => {
+      submittedPayload = payload;
+    };
+
+    render(
+      <RecipeForm
+        initialData={initialData}
+        onSubmit={handleSubmit}
+        submitLabel="Update Smoothie"
+      />
+    );
+
+    // Verify fiber and sugar inputs are prefilled with 7 and 28
+    expect(screen.getByDisplayValue('7')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('28')).toBeInTheDocument();
+
+    // Edit only calories
+    const caloriesInput = screen.getByDisplayValue('220');
+    await act(async () => {
+      fireEvent.change(caloriesInput, { target: { value: '250' } });
+    });
+
+    // Submit form
+    const submitBtn = screen.getByRole('button', { name: /Update Smoothie/i });
+    await act(async () => {
+      fireEvent.click(submitBtn);
+    });
+
+    await vi.waitFor(() => {
+      expect(submittedPayload).not.toBeNull();
+    });
+
+    expect(submittedPayload.nutrition.calories).toBe(250);
+    expect(submittedPayload.nutrition.protein).toBe(4);
+    expect(submittedPayload.nutrition.carbohydrates).toBe(45);
+    expect(submittedPayload.nutrition.fat).toBe(2);
+    expect(submittedPayload.nutrition.fiber).toBe(7);
+    expect(submittedPayload.nutrition.sugar).toBe(28);
   });
 });

@@ -61,6 +61,8 @@ const RecipeForm = ({
       protein: initialData?.nutrition?.protein !== undefined ? initialData.nutrition.protein : '',
       carbs: initialData?.nutrition?.carbohydrates !== undefined ? initialData.nutrition.carbohydrates : '',
       fat: initialData?.nutrition?.fat !== undefined ? initialData.nutrition.fat : '',
+      fiber: initialData?.nutrition?.fiber !== undefined ? initialData.nutrition.fiber : '',
+      sugar: initialData?.nutrition?.sugar !== undefined ? initialData.nutrition.sugar : '',
     },
   });
 
@@ -122,21 +124,33 @@ const RecipeForm = ({
     const protein = parseNutritionField(data.protein);
     const carbohydrates = parseNutritionField(data.carbs);
     const fat = parseNutritionField(data.fat);
+    const fiber = parseNutritionField(data.fiber);
+    const sugar = parseNutritionField(data.sugar);
+
+    // If an individual nutrition field is omitted in the form but existed in initialData, preserve it
+    const resolvedFiber = fiber !== undefined ? fiber : (initialData?.nutrition?.fiber !== undefined ? initialData.nutrition.fiber : undefined);
+    const resolvedSugar = sugar !== undefined ? sugar : (initialData?.nutrition?.sugar !== undefined ? initialData.nutrition.sugar : undefined);
+    const resolvedCalories = calories !== undefined ? calories : (initialData?.nutrition?.calories !== undefined ? initialData.nutrition.calories : undefined);
+    const resolvedProtein = protein !== undefined ? protein : (initialData?.nutrition?.protein !== undefined ? initialData.nutrition.protein : undefined);
+    const resolvedCarbs = carbohydrates !== undefined ? carbohydrates : (initialData?.nutrition?.carbohydrates !== undefined ? initialData.nutrition.carbohydrates : undefined);
+    const resolvedFat = fat !== undefined ? fat : (initialData?.nutrition?.fat !== undefined ? initialData.nutrition.fat : undefined);
 
     const hasNutrition =
-      calories !== undefined ||
-      protein !== undefined ||
-      carbohydrates !== undefined ||
-      fat !== undefined;
+      resolvedCalories !== undefined ||
+      resolvedProtein !== undefined ||
+      resolvedCarbs !== undefined ||
+      resolvedFat !== undefined ||
+      resolvedFiber !== undefined ||
+      resolvedSugar !== undefined;
 
     const nutritionPayload = hasNutrition
       ? {
-          calories: calories ?? 0,
-          protein: protein ?? 0,
-          carbohydrates: carbohydrates ?? 0,
-          fat: fat ?? 0,
-          fiber: 0,
-          sugar: 0,
+          ...(resolvedCalories !== undefined && { calories: resolvedCalories }),
+          ...(resolvedProtein !== undefined && { protein: resolvedProtein }),
+          ...(resolvedCarbs !== undefined && { carbohydrates: resolvedCarbs }),
+          ...(resolvedFat !== undefined && { fat: resolvedFat }),
+          ...(resolvedFiber !== undefined && { fiber: resolvedFiber }),
+          ...(resolvedSugar !== undefined && { sugar: resolvedSugar }),
         }
       : undefined;
 
@@ -405,7 +419,7 @@ const RecipeForm = ({
         <h3 className="text-sm font-bold text-[var(--color-dark)] uppercase tracking-wider border-b border-[rgba(138,144,112,0.12)] pb-2">
           Nutrition Estimates (Per Serving)
         </h3>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           <div className="space-y-1">
             <label className="block text-[11px] font-bold text-[var(--color-sage)] uppercase">Calories (kcal)</label>
             <input type="number" step="any" placeholder="450" className="input py-2 text-xs" {...register('calories')} />
@@ -421,6 +435,14 @@ const RecipeForm = ({
           <div className="space-y-1">
             <label className="block text-[11px] font-bold text-[var(--color-sage)] uppercase">Fat (g)</label>
             <input type="number" step="any" placeholder="14" className="input py-2 text-xs" {...register('fat')} />
+          </div>
+          <div className="space-y-1">
+            <label className="block text-[11px] font-bold text-[var(--color-sage)] uppercase">Fiber (g)</label>
+            <input type="number" step="any" placeholder="5" className="input py-2 text-xs" {...register('fiber')} />
+          </div>
+          <div className="space-y-1">
+            <label className="block text-[11px] font-bold text-[var(--color-sage)] uppercase">Sugar (g)</label>
+            <input type="number" step="any" placeholder="3" className="input py-2 text-xs" {...register('sugar')} />
           </div>
         </div>
       </div>
