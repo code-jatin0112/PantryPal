@@ -628,4 +628,76 @@ describe("Meal Planning & Cooking Mode Integration Persistence Tests (Phase 4)",
     });
     expect(dbNewItems).toHaveLength(1);
   });
+
+  // ── 15. Cook Again Lifecycle & Second Session Deduction ───────────
+  it("15. Cook Again creates a different session ID and accurately deducts stock on second completion", async () => {
+    // 0. Ensure no active sessions linger for recipe1 before testing fresh start & Cook Again
+    await prisma.cookingSession.updateMany({
+      where: { userId: user1.id, recipeId: recipe1.id, status: "active" },
+      data: { status: "completed" },
+    });
+
+    // 1. Ensure stock is available for 2 runs (requires 200g per run for 2 servings of recipe1)
+    await prisma.pantryItem.updateMany({
+      where: { pantryId: user1Pantry.id, name: "Penne Pasta" },
+      data: { quantity: 1000 },
+    });
+
+    // 2. Start session 1
+    const start1Res = await supertest(app)
+      .post(`/api/v1/recipes/${recipe1.id}/cooking-sessions`)
+      .set("Authorization", `Bearer ${user1Token}`)
+      .send({ servings: 2 });
+    expect(start1Res.status).toBe(201);
+    const session1Id = start1Res.body.data.session.id;
+
+    // 3. Complete session 1 -> stock deducted once (1000 - 200 = 800)
+    const comp1Res = await supertest(app)
+      .post(`/api/v1/cooking-sessions/${session1Id}/complete`)
+      .set("Authorization", `Bearer ${user1Token}`)
+      .send({ pantryId: user1Pantry.id });
+    expect(comp1Res.status).toBe(200);
+
+    const stockAfter1 = await prisma.pantryItem.findFirst({
+      where: { pantryId: user1Pantry.id, name: "Penne Pasta" },
+    });
+    expect(stockAfter1.quantity).toBe(800);
+
+    // 4. Duplicate completion on session 1 remains rejected (409)
+    const dupCompRes = await supertest(app)
+      .post(`/api/v1/cooking-sessions/${session1Id}/complete`)
+      .set("Authorization", `Bearer ${user1Token}`)
+      .send({ pantryId: user1Pantry.id });
+    expect(dupCompRes.status).toBe(409);
+
+    // 5. Cook Again: start session 2 for the same recipe
+    const start2Res = await supertest(app)
+      .post(`/api/v1/recipes/${recipe1.id}/cooking-sessions`)
+      .set("Authorization", `Bearer ${user1Token}`)
+      .send({ servings: 2 });
+    expect(start2Res.status).toBe(201);
+    const session2Id = start2Res.body.data.session.id;
+
+    // Verify session 2 has a genuinely different ID
+    expect(session2Id).not.toBe(session1Id);
+
+    // 6. Complete session 2 -> stock deducted exactly once more (800 - 200 = 600)
+    const comp2Res = await supertest(app)
+      .post(`/api/v1/cooking-sessions/${session2Id}/complete`)
+      .set("Authorization", `Bearer ${user1Token}`)
+      .send({ pantryId: user1Pantry.id });
+    expect(comp2Res.status).toBe(200);
+
+    const stockAfter2 = await prisma.pantryItem.findFirst({
+      where: { pantryId: user1Pantry.id, name: "Penne Pasta" },
+    });
+    expect(stockAfter2.quantity).toBe(600);
+
+    // 7. Progress update on completed session 2 is rejected (409)
+    const progRes = await supertest(app)
+      .patch(`/api/v1/cooking-sessions/${session2Id}/progress`)
+      .set("Authorization", `Bearer ${user1Token}`)
+      .send({ currentStep: 2 });
+    expect(progRes.status).toBe(409);
+  });
 });
