@@ -49,7 +49,7 @@ const PantryForm = ({
           category: 'Produce',
           expiryDate: '',
           purchaseDate: new Date().toISOString().split('T')[0],
-          minimumQuantity: 1,
+          minimumQuantity: '',
           notes: '',
         },
   });
@@ -195,6 +195,20 @@ const PantryForm = ({
             {...register('expiryDate')}
           />
         </div>
+      </div>
+
+      {/* Notes */}
+      <div className="space-y-1.5">
+        <label htmlFor="pantry-item-notes" className="block text-xs font-bold text-[var(--color-dark)] uppercase tracking-wider">
+          Notes
+        </label>
+        <textarea
+          id="pantry-item-notes"
+          rows={2}
+          placeholder="e.g. Keep in crisper drawer, bought on sale"
+          className="input resize-none"
+          {...register('notes')}
+        />
       </div>
 
       {/* Action Buttons */}

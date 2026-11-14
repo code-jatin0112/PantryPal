@@ -15,6 +15,10 @@ export const create = async (req, res, next) => {
       quantity: req.body.quantity,
       unit: req.body.unit,
       expiryDate: req.body.expiryDate,
+      category: req.body.category,
+      minimumQuantity: req.body.minimumQuantity,
+      purchaseDate: req.body.purchaseDate,
+      notes: req.body.notes,
     });
 
     return res.status(201).json({
@@ -75,6 +79,10 @@ export const update = async (req, res, next) => {
       quantity: req.body.quantity,
       unit: req.body.unit,
       expiryDate: req.body.expiryDate,
+      category: req.body.category,
+      minimumQuantity: req.body.minimumQuantity,
+      purchaseDate: req.body.purchaseDate,
+      notes: req.body.notes,
     });
 
     return res.status(200).json({

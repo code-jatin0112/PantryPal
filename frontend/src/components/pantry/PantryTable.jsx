@@ -83,7 +83,7 @@ const PantryTable = ({ items = [], onEdit, onDelete, onAdjustStock }) => {
                   <td className="py-3.5 px-4">
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <ExpiryBadge expiryDate={expiryDate} size="sm" />
-                      <StockBadge quantity={item.quantity} minStock={item.minimumQuantity || 1} size="sm" />
+                      <StockBadge quantity={item.quantity} minStock={item.minimumQuantity ?? 5} size="sm" />
                     </div>
                   </td>
 

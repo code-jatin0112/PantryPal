@@ -85,7 +85,7 @@ const Pantry = () => {
         // Status filter
         let matchesStatus = true;
         const expiryInfo = getExpiryStatus(item.expiryDate || item.expirationDate);
-        const isLow = item.quantity !== undefined && item.quantity <= (item.minimumQuantity || 1);
+        const isLow = item.quantity !== undefined && item.quantity <= (item.minimumQuantity ?? 5);
 
         if (status === 'FRESH') {
           matchesStatus = expiryInfo.status === 'FRESH';
@@ -146,7 +146,12 @@ const Pantry = () => {
         unit: formData.unit,
         category: formData.category || undefined,
         expiryDate: formData.expiryDate ? new Date(formData.expiryDate).toISOString() : undefined,
-        minimumQuantity: formData.minimumQuantity || undefined,
+        purchaseDate: formData.purchaseDate ? new Date(formData.purchaseDate).toISOString() : undefined,
+        minimumQuantity:
+          formData.minimumQuantity !== undefined && formData.minimumQuantity !== ''
+            ? Number(formData.minimumQuantity)
+            : undefined,
+        notes: formData.notes || undefined,
       };
 
       if (editingItem) {

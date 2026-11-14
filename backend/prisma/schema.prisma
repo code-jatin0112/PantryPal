@@ -61,19 +61,24 @@ model Pantry {
 }
 
 model PantryItem {
-  id         String    @id @default(uuid())
-  pantryId   String
-  name       String
-  quantity   Float
-  unit       String
-  expiryDate DateTime?
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
+  id              String    @id @default(uuid())
+  pantryId        String
+  name            String
+  quantity        Float
+  unit            String
+  category        String?   @default("Other")
+  minimumQuantity Float?
+  purchaseDate    DateTime?
+  notes           String?
+  expiryDate      DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   pantry Pantry @relation(fields: [pantryId], references: [id], onDelete: Cascade)
 
   @@index([pantryId])
   @@index([expiryDate])
+  @@index([category])
 }
 
 model Recipe {
@@ -135,6 +140,8 @@ model ShoppingListItem {
   quantity    Float
   unit        String
   isPurchased Boolean  @default(false)
+  category    String?  @default("Other")
+  priority    String   @default("MEDIUM")
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -144,6 +151,7 @@ model ShoppingListItem {
   @@index([userId])
   @@index([recipeId])
   @@index([userId, isPurchased])
+  @@index([priority])
 }
 
 model MealPlan {
