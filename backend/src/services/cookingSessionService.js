@@ -150,12 +150,41 @@ export const updateCookingProgress = async ({
     );
   }
 
-  return prisma.cookingSession.update({
+  // Atomically update only while status is active to prevent racing with session completion
+  const updateResult = await prisma.cookingSession.updateMany({
     where: {
       id: sessionId,
+      userId,
+      status: "active",
     },
     data: {
       currentStep,
+    },
+  });
+
+  if (updateResult.count === 0) {
+    const checkSession = await prisma.cookingSession.findFirst({
+      where: { id: sessionId, userId },
+    });
+    if (!checkSession) {
+      throw new AppError(
+        "Cooking session not found",
+        404,
+        "COOKING_SESSION_NOT_FOUND"
+      );
+    }
+    if (checkSession.status === "completed") {
+      throw new AppError(
+        "Cooking session is already completed",
+        409,
+        "COOKING_SESSION_COMPLETED"
+      );
+    }
+  }
+
+  return prisma.cookingSession.findUnique({
+    where: {
+      id: sessionId,
     },
   });
 };
