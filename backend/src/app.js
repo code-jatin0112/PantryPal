@@ -56,6 +56,7 @@ app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/preferences", userPreferenceRoutes);
 app.use("/api/v1/pantries", pantryRoutes);
 app.use("/api/v1/pantries/:pantryId/items", pantryItemRoutes);
+app.use("/api/v1/recipes", recipeFavoriteRoutes);
 app.use("/api/v1/recipes", recipeRoutes);
 app.use(
   "/api/v1/recipes/:recipeId/ingredients",
@@ -71,7 +72,6 @@ app.use(
 );
 app.use("/api/v1/shopping-list", shoppingListRoutes);
 app.use("/api/v1/meal-plans", mealPlanRoutes);
-app.use("/api/v1/recipes", recipeFavoriteRoutes);
 app.use("/api/v1/pantries", pantryExpiryRoutes);
 app.use("/api/v1/pantries", pantryLowStockRoutes);
 app.use("/api/v1", cookingSessionRoutes);

@@ -19,7 +19,7 @@ import EditProfileModal from '../../components/settings/EditProfileModal';
 import ChangePasswordModal from '../../components/settings/ChangePasswordModal';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
-import { getRecipes } from '../../services/recipeService';
+import { getRecipes, getFavoriteRecipes } from '../../services/recipeService';
 import { getMealPlans } from '../../services/mealPlanService';
 import { getShoppingList } from '../../services/shoppingListService';
 import { getPantries, getPantryItems } from '../../services/pantryService';
@@ -60,11 +60,12 @@ const Profile = () => {
   useEffect(() => {
     const fetchStats = async () => {
       try {
-        const [pantriesRes, recipesRes, mealPlansRes, shoppingRes] = await Promise.allSettled([
+        const [pantriesRes, recipesRes, mealPlansRes, shoppingRes, favsRes] = await Promise.allSettled([
           getPantries(),
           getRecipes(),
           getMealPlans(),
           getShoppingList(),
+          getFavoriteRecipes(),
         ]);
 
         let livePantryCount = 0;
@@ -84,14 +85,14 @@ const Profile = () => {
         const recipes = recipesRes.status === 'fulfilled' ? recipesRes.value.data?.data?.recipes || recipesRes.value.data?.data || [] : [];
         const mealPlans = mealPlansRes.status === 'fulfilled' ? mealPlansRes.value.data?.data?.mealPlans || mealPlansRes.value.data?.data || [] : [];
         const shopping = shoppingRes.status === 'fulfilled' ? shoppingRes.value.data?.data?.items || shoppingRes.value.data?.data || [] : [];
-        const favorites = recipes.filter((r) => r.isFavorite);
+        const favList = favsRes.status === 'fulfilled' ? favsRes.value.data?.data?.favorites || [] : [];
 
         setStats({
           recipesCount: recipes.length,
           pantryCount: livePantryCount,
           shoppingCount: shopping.length,
           mealPlansCount: mealPlans.length,
-          favoritesCount: favorites.length,
+          favoritesCount: favList.length,
         });
       } catch {}
     };

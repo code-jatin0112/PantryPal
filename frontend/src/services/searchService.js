@@ -63,6 +63,7 @@ export const searchGlobal = async (query = '', filter = 'all', pantryId = null) 
       api.get(RECIPES.LIST).catch(() => ({ data: { data: [] } })),
       api.get(MEAL_PLANS.LIST).catch(() => ({ data: { data: [] } })),
       api.get(SHOPPING.LIST).catch(() => ({ data: { data: [] } })),
+      api.get(RECIPES.FAVORITES).catch(() => ({ data: { data: [] } })),
     ];
 
     let targetPantryId = pantryId;
@@ -82,7 +83,13 @@ export const searchGlobal = async (query = '', filter = 'all', pantryId = null) 
       );
     }
 
-    const [recipesRes, mealPlansRes, shoppingRes, pantryRes] = await Promise.allSettled(promises);
+    const [recipesRes, mealPlansRes, shoppingRes, favsRes, pantryRes] = await Promise.allSettled(promises);
+
+    const favList =
+      favsRes.status === 'fulfilled'
+        ? favsRes.value.data?.data?.favorites || favsRes.value.data?.data || []
+        : [];
+    const favIds = new Set(favList.map((f) => f.recipeId || f.recipe?.id || f.id).filter(Boolean));
 
     // Map Recipes
     if (recipesRes.status === 'fulfilled') {
@@ -95,7 +102,7 @@ export const searchGlobal = async (query = '', filter = 'all', pantryId = null) 
           subtitle: r.description || `Cuisine: ${r.cuisine || 'General'}`,
           metadata: `${(r.prepTime || 0) + (r.cookTime || 0)} mins • ${r.servings || 4} servings`,
           url: `/recipes/${r.id}`,
-          isFavorite: Boolean(r.isFavorite),
+          isFavorite: favIds.has(r.id),
         });
       });
     }

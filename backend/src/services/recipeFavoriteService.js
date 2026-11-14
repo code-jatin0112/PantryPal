@@ -7,6 +7,7 @@ export const addRecipeFavorite = async ({
   const recipe = await prisma.recipe.findFirst({
     where: {
       id: recipeId,
+      userId,
     },
   });
 
@@ -64,6 +65,9 @@ export const getFavoriteRecipes = async ({
   return prisma.recipeFavorite.findMany({
     where: {
       userId,
+      recipe: {
+        userId,
+      },
     },
     orderBy: {
       createdAt: "desc",
@@ -87,6 +91,20 @@ export const removeRecipeFavorite = async ({
   userId,
   recipeId,
 }) => {
+  const recipe = await prisma.recipe.findFirst({
+    where: {
+      id: recipeId,
+      userId,
+    },
+  });
+
+  if (!recipe) {
+    return {
+      type: "RECIPE_NOT_FOUND",
+      data: null,
+    };
+  }
+
   const favorite = await prisma.recipeFavorite.findUnique({
     where: {
       userId_recipeId: {
@@ -97,7 +115,10 @@ export const removeRecipeFavorite = async ({
   });
 
   if (!favorite) {
-    return null;
+    return {
+      type: "FAVORITE_NOT_FOUND",
+      data: null,
+    };
   }
 
   await prisma.recipeFavorite.delete({
@@ -109,13 +130,30 @@ export const removeRecipeFavorite = async ({
     },
   });
 
-  return true;
+  return {
+    type: "SUCCESS",
+    data: true,
+  };
 };
 
 export const isRecipeFavorited = async ({
   userId,
   recipeId,
 }) => {
+  const recipe = await prisma.recipe.findFirst({
+    where: {
+      id: recipeId,
+      userId,
+    },
+  });
+
+  if (!recipe) {
+    return {
+      type: "RECIPE_NOT_FOUND",
+      data: null,
+    };
+  }
+
   const favorite = await prisma.recipeFavorite.findUnique({
     where: {
       userId_recipeId: {
@@ -125,5 +163,8 @@ export const isRecipeFavorited = async ({
     },
   });
 
-  return Boolean(favorite);
+  return {
+    type: "SUCCESS",
+    data: Boolean(favorite),
+  };
 };
