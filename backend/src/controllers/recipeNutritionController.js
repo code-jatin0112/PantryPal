@@ -35,6 +35,15 @@ export const createRecipeNutritionController = async (req, res, next) => {
       },
     });
   } catch (error) {
+    if (error.code === "RECIPE_NUTRITION_EXISTS" || error.code === "P2002") {
+      return res.status(409).json({
+        success: false,
+        error: {
+          code: "RECIPE_NUTRITION_EXISTS",
+          message: "Nutrition information already exists for this recipe",
+        },
+      });
+    }
     next(error);
   }
 };
@@ -56,7 +65,7 @@ export const getRecipeNutritionController = async (req, res, next) => {
       });
     }
 
-    if (!nutrition) {
+    if (nutrition === undefined) {
       return res.status(404).json({
         success: false,
         error: {
@@ -90,7 +99,17 @@ export const updateRecipeNutritionController = async (req, res, next) => {
       sugar: req.body.sugar,
     });
 
-    if (!nutrition) {
+    if (nutrition === null) {
+      return res.status(404).json({
+        success: false,
+        error: {
+          code: "RECIPE_NOT_FOUND",
+          message: "Recipe not found",
+        },
+      });
+    }
+
+    if (nutrition === undefined) {
       return res.status(404).json({
         success: false,
         error: {
@@ -118,7 +137,17 @@ export const deleteRecipeNutritionController = async (req, res, next) => {
       recipeId: req.params.recipeId,
     });
 
-    if (!deleted) {
+    if (deleted === null) {
+      return res.status(404).json({
+        success: false,
+        error: {
+          code: "RECIPE_NOT_FOUND",
+          message: "Recipe not found",
+        },
+      });
+    }
+
+    if (deleted === undefined || !deleted) {
       return res.status(404).json({
         success: false,
         error: {

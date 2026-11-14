@@ -50,5 +50,8 @@ export const getScaledRecipe = scaleRecipeServings;
 export const getRecipeNutrition = (recipeId) =>
   api.get(RECIPES.NUTRITION(recipeId));
 
-export const updateRecipeNutrition = (recipeId, data) =>
+export const createRecipeNutrition = (recipeId, data) =>
   api.post(RECIPES.NUTRITION(recipeId), data);
+
+export const updateRecipeNutrition = (recipeId, data) =>
+  api.patch(RECIPES.NUTRITION(recipeId), data);

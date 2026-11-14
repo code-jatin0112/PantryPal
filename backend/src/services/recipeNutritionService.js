@@ -7,8 +7,8 @@ export const createRecipeNutrition = async ({
   protein,
   carbohydrates,
   fat,
-  fiber,
-  sugar,
+  fiber = 0,
+  sugar = 0,
 }) => {
   const recipe = await prisma.recipe.findFirst({
     where: {
@@ -21,15 +21,29 @@ export const createRecipeNutrition = async ({
     return null;
   }
 
+  // Check if nutrition already exists to prevent duplicate creation (Prisma P2002)
+  const existing = await prisma.recipeNutrition.findUnique({
+    where: {
+      recipeId,
+    },
+  });
+
+  if (existing) {
+    const error = new Error("Nutrition information already exists for this recipe");
+    error.statusCode = 409;
+    error.code = "RECIPE_NUTRITION_EXISTS";
+    throw error;
+  }
+
   return prisma.recipeNutrition.create({
     data: {
       recipeId,
-      calories,
-      protein,
-      carbohydrates,
-      fat,
-      fiber,
-      sugar,
+      calories: calories ?? 0,
+      protein: protein ?? 0,
+      carbohydrates: carbohydrates ?? 0,
+      fat: fat ?? 0,
+      fiber: fiber ?? 0,
+      sugar: sugar ?? 0,
     },
   });
 };
@@ -90,7 +104,7 @@ export const updateRecipeNutrition = async ({
   });
 
   if (!nutrition) {
-    return null;
+    return undefined;
   }
 
   return prisma.recipeNutrition.update({
@@ -130,7 +144,7 @@ export const deleteRecipeNutrition = async ({
   });
 
   if (!nutrition) {
-    return null;
+    return undefined;
   }
 
   await prisma.recipeNutrition.delete({
