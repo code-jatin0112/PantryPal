@@ -29,7 +29,7 @@ const MealPlanTable = ({
               const startDate = plan.startDate ? new Date(plan.startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '';
               const endDate = plan.endDate ? new Date(plan.endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '';
               const dateRange = startDate && endDate ? `${startDate} – ${endDate}` : startDate || '—';
-              const dishesCount = plan.dishes?.length ?? plan._count?.dishes ?? plan.mealCount ?? 0;
+              const dishesCount = (plan.dishes || plan.items)?.length ?? plan._count?.dishes ?? plan.mealCount ?? 0;
               const priority = (plan.budgetPriority || 'medium').toLowerCase();
 
               const priorityVariant =

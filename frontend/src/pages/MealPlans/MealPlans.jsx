@@ -140,8 +140,9 @@ const MealPlans = () => {
   const allDishes = useMemo(() => {
     const dishes = [];
     processedPlans.forEach((p) => {
-      if (p.dishes && Array.isArray(p.dishes)) {
-        dishes.push(...p.dishes);
+      const pDishes = p.dishes || p.items;
+      if (pDishes && Array.isArray(pDishes)) {
+        dishes.push(...pDishes);
       }
     });
     return dishes;

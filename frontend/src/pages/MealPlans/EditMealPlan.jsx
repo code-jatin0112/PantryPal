@@ -43,6 +43,7 @@ const EditMealPlan = () => {
         endDate: formData.endDate,
         peopleCount: formData.peopleCount,
         budget: formData.budget,
+        dishes: formData.dishes,
       });
 
       toast(`"${formData.name}" updated successfully!`, 'success');

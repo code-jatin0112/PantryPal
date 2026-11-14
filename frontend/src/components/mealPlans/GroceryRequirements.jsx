@@ -18,7 +18,7 @@ const GroceryRequirements = ({ requirements = [], mealPlanName = 'this meal plan
     if (items.length === 0) return;
     setAdding(true);
     try {
-      await Promise.allSettled(
+      const results = await Promise.allSettled(
         items.map((item) =>
           createShoppingListItem({
             name: item.name || item.ingredientName,
@@ -28,10 +28,29 @@ const GroceryRequirements = ({ requirements = [], mealPlanName = 'this meal plan
         )
       );
 
-      setAddedIds(new Set(items.map((_, idx) => idx)));
-      toast(`Added ${items.length} items to your shopping list! 🛒`, 'success');
+      const successfulIndices = [];
+      let failureCount = 0;
+      results.forEach((res, idx) => {
+        if (res.status === 'fulfilled') {
+          successfulIndices.push(idx);
+        } else {
+          failureCount += 1;
+        }
+      });
+
+      if (successfulIndices.length > 0) {
+        setAddedIds((prev) => new Set([...prev, ...successfulIndices]));
+      }
+
+      if (failureCount === 0) {
+        toast(`Added ${successfulIndices.length} items to your shopping list! 🛒`, 'success');
+      } else if (successfulIndices.length > 0) {
+        toast(`Added ${successfulIndices.length} items, but ${failureCount} failed to save.`, 'warning');
+      } else {
+        toast('Failed to add items to shopping list.', 'error');
+      }
     } catch {
-      toast('Failed to add some items to shopping list.', 'error');
+      toast('Failed to add items to shopping list.', 'error');
     } finally {
       setAdding(false);
     }

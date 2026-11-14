@@ -115,7 +115,7 @@ const MealPlanDetails = () => {
   const endDate = mealPlan.endDate ? new Date(mealPlan.endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
   const dateRange = startDate && endDate ? `${startDate} – ${endDate}` : startDate || 'Flexible Schedule';
 
-  const dishes = mealPlan.dishes || [];
+  const dishes = mealPlan.dishes || mealPlan.items || [];
   const priority = (mealPlan.budgetPriority || 'medium').toLowerCase();
   const priorityVariant =
     priority === 'high' ? 'danger' : priority === 'low' ? 'neutral' : 'warning';

@@ -61,6 +61,17 @@ router.post(
 );
 
 router.get(
+  "/:mealPlanId/grocery-requirements",
+  mealPlanParamsValidation,
+  handleValidationErrors,
+  (req, res, next) => {
+    req.body = req.body || {};
+    req.body.pantryId = req.body.pantryId || req.query.pantryId;
+    return getMealPlanGroceryRequirementsController(req, res, next);
+  }
+);
+
+router.get(
   "/:mealPlanId",
   mealPlanParamsValidation,
   handleValidationErrors,
