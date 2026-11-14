@@ -354,6 +354,18 @@ export const updateMealPlan = async ({
         where: { mealPlanId },
       });
       const currentMap = new Map(currentItems.map((i) => [i.id, i]));
+
+      // Validate that any submitted dish ID belongs to this meal plan
+      for (const dish of dishes) {
+        if (dish.id && !currentMap.has(dish.id)) {
+          throw new AppError(
+            `Invalid dish ID: ${dish.id}. Submitted dish does not belong to this meal plan`,
+            400,
+            "INVALID_MEAL_PLAN_DISH_ID"
+          );
+        }
+      }
+
       const payloadIdSet = new Set(dishes.filter((d) => d.id).map((d) => d.id));
 
       // Remove deleted dishes
@@ -369,7 +381,7 @@ export const updateMealPlan = async ({
 
       // Add new or update existing dishes
       for (const dish of dishes) {
-        if (!dish.id || !currentMap.has(dish.id)) {
+        if (!dish.id) {
           await itemClient.create({
             data: {
               mealPlanId,
