@@ -700,4 +700,78 @@ describe("Meal Planning & Cooking Mode Integration Persistence Tests (Phase 4)",
       .send({ currentStep: 2 });
     expect(progRes.status).toBe(409);
   });
+
+  // ── 16. Ordered Writes, Backward Navigation & Post-Completion Lock ─
+  it("16. reliably persists intentional backward navigation and rejects progress updates after session completion", async () => {
+    // 1. Start a fresh active session
+    await prisma.cookingSession.updateMany({
+      where: { userId: user1.id, recipeId: recipe1.id, status: "active" },
+      data: { status: "completed" },
+    });
+
+    await prisma.pantryItem.updateMany({
+      where: { pantryId: user1Pantry.id, name: "Penne Pasta" },
+      data: { quantity: 1000 },
+    });
+    await prisma.pantryItem.updateMany({
+      where: { pantryId: user1Pantry.id, name: "Garlic Cloves" },
+      data: { quantity: 50 },
+    });
+
+    const startRes = await supertest(app)
+      .post(`/api/v1/recipes/${recipe1.id}/cooking-sessions`)
+      .set("Authorization", `Bearer ${user1Token}`)
+      .send({ servings: 2 });
+    expect(startRes.status).toBe(201);
+    const sessionId = startRes.body.data.session.id;
+
+    // 2. Advance forward: Step 1 -> Step 2
+    const step2Res = await supertest(app)
+      .patch(`/api/v1/cooking-sessions/${sessionId}/progress`)
+      .set("Authorization", `Bearer ${user1Token}`)
+      .send({ currentStep: 2 });
+    expect(step2Res.status).toBe(200);
+
+    // 3. Advance forward: Step 2 -> Step 3
+    const step3Res = await supertest(app)
+      .patch(`/api/v1/cooking-sessions/${sessionId}/progress`)
+      .set("Authorization", `Bearer ${user1Token}`)
+      .send({ currentStep: 3 });
+    expect(step3Res.status).toBe(200);
+
+    // 4. Intentional backward navigation: Step 3 -> Step 2
+    const backRes = await supertest(app)
+      .patch(`/api/v1/cooking-sessions/${sessionId}/progress`)
+      .set("Authorization", `Bearer ${user1Token}`)
+      .send({ currentStep: 2 });
+    expect(backRes.status).toBe(200);
+
+    // 5. Verify database confirms the backward step (2)
+    const dbSession = await prisma.cookingSession.findUnique({
+      where: { id: sessionId },
+    });
+    expect(dbSession.currentStep).toBe(2);
+
+    // 6. Complete session
+    const compRes = await supertest(app)
+      .post(`/api/v1/cooking-sessions/${sessionId}/complete`)
+      .set("Authorization", `Bearer ${user1Token}`)
+      .send({ pantryId: user1Pantry.id });
+    expect(compRes.status).toBe(200);
+
+    // 7. In-flight / late progress update arriving after completion must be rejected (409)
+    const lateProgressRes = await supertest(app)
+      .patch(`/api/v1/cooking-sessions/${sessionId}/progress`)
+      .set("Authorization", `Bearer ${user1Token}`)
+      .send({ currentStep: 1 });
+    expect(lateProgressRes.status).toBe(409);
+    expect(lateProgressRes.body.error.code).toBe("COOKING_SESSION_COMPLETED");
+
+    // 8. Completed status and final step are untouched
+    const finalizedDbSession = await prisma.cookingSession.findUnique({
+      where: { id: sessionId },
+    });
+    expect(finalizedDbSession.status).toBe("completed");
+    expect(finalizedDbSession.currentStep).toBe(recipe1.instructions.split("\n").filter(Boolean).length || 3);
+  });
 });

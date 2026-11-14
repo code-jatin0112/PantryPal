@@ -513,4 +513,92 @@ describe('Cooking Mode Test Suite', () => {
     expect(screen.getByText('Step 3 of 5')).toBeInTheDocument();
     expect(screen.queryByText(/Progress not synced/i)).not.toBeInTheDocument();
   });
+
+  it('updateCookingProgress serializes rapid calls and coalesces intermediate steps', async () => {
+    let resolvePatch1;
+    let resolvePatch2;
+
+    const patchPromise1 = new Promise((resolve) => {
+      resolvePatch1 = resolve;
+    });
+    const patchPromise2 = new Promise((resolve) => {
+      resolvePatch2 = resolve;
+    });
+
+    const apiPatchSpy = vi.spyOn(api, 'patch')
+      .mockImplementationOnce(() => patchPromise1)
+      .mockImplementationOnce(() => patchPromise2);
+
+    // Call Step 2
+    const p1 = updateCookingProgress('session-queue-1', { currentStep: 2 });
+    // Rapidly call Step 3 and Step 4 while Step 2 is in-flight
+    const p2 = updateCookingProgress('session-queue-1', { currentStep: 3 });
+    const p3 = updateCookingProgress('session-queue-1', { currentStep: 4 });
+
+    expect(apiPatchSpy).toHaveBeenCalledTimes(1);
+    expect(apiPatchSpy).toHaveBeenLastCalledWith(
+      expect.stringContaining('/cooking-sessions/session-queue-1/progress'),
+      { currentStep: 2 }
+    );
+
+    // Resolve Step 2
+    resolvePatch1({ data: { session: { currentStep: 2 } } });
+    await p1;
+
+    // Queue should now automatically dispatch the latest pending step (4), coalescing intermediate step 3
+    expect(apiPatchSpy).toHaveBeenCalledTimes(2);
+    expect(apiPatchSpy).toHaveBeenLastCalledWith(
+      expect.stringContaining('/cooking-sessions/session-queue-1/progress'),
+      { currentStep: 4 }
+    );
+
+    // Resolve Step 4
+    resolvePatch2({ data: { session: { currentStep: 4 } } });
+    await Promise.all([p2, p3]);
+
+    apiPatchSpy.mockRestore();
+  });
+
+  it('updateCookingProgress reliably persists intentional backward navigation in order', async () => {
+    let resolvePatch1;
+    let resolvePatch2;
+
+    const patchPromise1 = new Promise((resolve) => {
+      resolvePatch1 = resolve;
+    });
+    const patchPromise2 = new Promise((resolve) => {
+      resolvePatch2 = resolve;
+    });
+
+    const apiPatchSpy = vi.spyOn(api, 'patch')
+      .mockImplementationOnce(() => patchPromise1)
+      .mockImplementationOnce(() => patchPromise2);
+
+    // Navigating back: currently on Step 4, user clicks Step 3
+    const p1 = updateCookingProgress('session-queue-2', { currentStep: 3 });
+    // User quickly clicks Step 2 while Step 3 is in-flight
+    const p2 = updateCookingProgress('session-queue-2', { currentStep: 2 });
+
+    expect(apiPatchSpy).toHaveBeenCalledTimes(1);
+    expect(apiPatchSpy).toHaveBeenLastCalledWith(
+      expect.stringContaining('/cooking-sessions/session-queue-2/progress'),
+      { currentStep: 3 }
+    );
+
+    // Step 3 finishes
+    resolvePatch1({ data: { session: { currentStep: 3 } } });
+    await p1;
+
+    // Step 2 is dispatched next
+    expect(apiPatchSpy).toHaveBeenCalledTimes(2);
+    expect(apiPatchSpy).toHaveBeenLastCalledWith(
+      expect.stringContaining('/cooking-sessions/session-queue-2/progress'),
+      { currentStep: 2 }
+    );
+
+    resolvePatch2({ data: { session: { currentStep: 2 } } });
+    await p2;
+
+    apiPatchSpy.mockRestore();
+  });
 });
