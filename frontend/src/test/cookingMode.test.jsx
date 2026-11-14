@@ -5,6 +5,8 @@ import CookingProgress from '../components/cooking/CookingProgress';
 import StepCard from '../components/cooking/StepCard';
 import IngredientChecklist from '../components/cooking/IngredientChecklist';
 import CompletionModal from '../components/cooking/CompletionModal';
+import { getActiveCookingSession, updateCookingProgress } from '../services/cookingService';
+import api from '../services/api';
 
 const mockStep = {
   title: 'Step 1: Marinate Chicken',
@@ -98,5 +100,38 @@ describe('Cooking Mode Test Suite', () => {
     expect(screen.getByText('Tuscan Salmon')).toBeInTheDocument();
     expect(screen.getByText('25 Mins Total')).toBeInTheDocument();
     expect(screen.getByText('2 Portions')).toBeInTheDocument();
+  });
+
+  it('getActiveCookingSession returns null on 404 but re-throws network or server errors', async () => {
+    const apiGetSpy = vi.spyOn(api, 'get');
+
+    // 404 case: returns null
+    apiGetSpy.mockRejectedValueOnce({ response: { status: 404 } });
+    const result404 = await getActiveCookingSession('rec-1');
+    expect(result404).toBeNull();
+
+    // 500 error case: re-throws
+    apiGetSpy.mockRejectedValueOnce({ response: { status: 500, data: { message: 'Internal error' } } });
+    await expect(getActiveCookingSession('rec-1')).rejects.toMatchObject({
+      response: { status: 500 },
+    });
+
+    // Network error case: re-throws
+    apiGetSpy.mockRejectedValueOnce(new Error('Network failure'));
+    await expect(getActiveCookingSession('rec-1')).rejects.toThrow('Network failure');
+
+    apiGetSpy.mockRestore();
+  });
+
+  it('updateCookingProgress ensures 1-based indexing for backend persistence', async () => {
+    const apiPatchSpy = vi.spyOn(api, 'patch').mockResolvedValueOnce({ data: { success: true } });
+
+    await updateCookingProgress('session-123', { currentStep: 0 });
+    expect(apiPatchSpy).toHaveBeenCalledWith(
+      expect.stringContaining('/cooking-sessions/session-123/progress'),
+      { currentStep: 1 }
+    );
+
+    apiPatchSpy.mockRestore();
   });
 });

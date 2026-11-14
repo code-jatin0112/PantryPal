@@ -554,4 +554,78 @@ describe("Meal Planning & Cooking Mode Integration Persistence Tests (Phase 4)",
 
     expect([403, 404]).toContain(updatePlanRes.status);
   });
+
+  // ── 13. Dish ID Validation & Transaction Rollback ──────────────
+  it("13. rejects update with unfamiliar dish ID with 400 and rolls back earlier mutations", async () => {
+    const foreignDishId = randomUUID();
+    const originalPlan = await prisma.mealPlan.findUnique({
+      where: { id: createdMealPlanId },
+    });
+
+    const res = await supertest(app)
+      .patch(`/api/v1/meal-plans/${createdMealPlanId}`)
+      .set("Authorization", `Bearer ${user1Token}`)
+      .send({
+        name: "This Name Must Rollback",
+        dishes: [
+          {
+            id: foreignDishId,
+            recipeId: recipe1.id,
+            requestedServings: 2,
+          },
+        ],
+      });
+
+    expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
+    expect(res.body.error.code).toBe("INVALID_MEAL_PLAN_DISH_ID");
+
+    // Verify rollback: name did NOT change in database
+    const dbPlan = await prisma.mealPlan.findUnique({
+      where: { id: createdMealPlanId },
+    });
+    expect(dbPlan.name).toBe(originalPlan.name);
+  });
+
+  // ── 14. Empty Dish Array & New Dish ID Omission ─────────────────
+  it("14. preserves genuine empty dish array updates and creates new dishes when ID is omitted", async () => {
+    // 1. Update to empty array
+    const emptyRes = await supertest(app)
+      .patch(`/api/v1/meal-plans/${createdMealPlanId}`)
+      .set("Authorization", `Bearer ${user1Token}`)
+      .send({
+        dishes: [],
+      });
+
+    expect(emptyRes.status).toBe(200);
+    expect(emptyRes.body.data.mealPlan.dishes).toHaveLength(0);
+
+    const dbEmptyItems = await prisma.mealPlanItem.findMany({
+      where: { mealPlanId: createdMealPlanId },
+    });
+    expect(dbEmptyItems).toHaveLength(0);
+
+    // 2. Add brand new dish omitting ID
+    const addRes = await supertest(app)
+      .patch(`/api/v1/meal-plans/${createdMealPlanId}`)
+      .set("Authorization", `Bearer ${user1Token}`)
+      .send({
+        dishes: [
+          {
+            recipeId: recipe1.id,
+            mealType: "Dinner",
+            requestedServings: 2,
+          },
+        ],
+      });
+
+    expect(addRes.status).toBe(200);
+    expect(addRes.body.data.mealPlan.dishes).toHaveLength(1);
+    expect(addRes.body.data.mealPlan.dishes[0].id).toBeDefined();
+
+    const dbNewItems = await prisma.mealPlanItem.findMany({
+      where: { mealPlanId: createdMealPlanId },
+    });
+    expect(dbNewItems).toHaveLength(1);
+  });
 });
