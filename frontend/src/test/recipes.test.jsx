@@ -1,11 +1,12 @@
 import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 import { BrowserRouter } from 'react-router-dom';
 import RecipeCard from '../components/recipes/RecipeCard';
 import ServingScaler from '../components/recipes/ServingScaler';
 import NutritionCard from '../components/recipes/NutritionCard';
 import FavoriteButton from '../components/recipes/FavoriteButton';
+import RecipeForm from '../components/recipes/RecipeForm';
 
 const mockRecipe = {
   id: 'rec-test-1',
@@ -99,5 +100,64 @@ describe('Recipes Module Test Suite', () => {
     expect(parseFavoriteStatus({ isFavorited: false, isFavorite: false })).toBe(false);
     expect(parseFavoriteStatus(null)).toBe(false);
     expect(parseFavoriteStatus(undefined)).toBe(false);
+  });
+
+  it('RecipeForm preserves existing ingredient IDs and maps zero nutrition values correctly', async () => {
+    const initialData = {
+      id: 'rec-test-1',
+      title: 'Diet Lemonade',
+      instructions: 'Squeeze lemon. Mix with water.',
+      ingredients: [
+        { id: 'ing-uuid-1', name: 'Fresh Lemon', quantity: 2, unit: 'pcs' },
+        { id: 'ing-uuid-2', name: 'Water', quantity: 500, unit: 'ml' },
+      ],
+      nutrition: {
+        calories: 0,
+        protein: 0,
+        carbohydrates: 1,
+        fat: 0,
+      },
+    };
+
+    let submittedPayload = null;
+    const handleSubmit = (payload) => {
+      submittedPayload = payload;
+    };
+
+    render(
+      <RecipeForm
+        initialData={initialData}
+        onSubmit={handleSubmit}
+        submitLabel="Save Recipe"
+      />
+    );
+
+    // Verify ingredient inputs are prefilled with existing values
+    expect(screen.getByDisplayValue('Fresh Lemon')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('Water')).toBeInTheDocument();
+
+    // Verify 0 values for nutrition are populated in inputs
+    const calorieInputs = screen.getAllByDisplayValue('0');
+    expect(calorieInputs.length).toBeGreaterThanOrEqual(1);
+
+    // Submit the form
+    const submitBtn = screen.getByRole('button', { name: /Save Recipe/i });
+    await act(async () => {
+      fireEvent.click(submitBtn);
+    });
+
+    // Verify preserved ingredient IDs and preserved zero nutrition
+    await vi.waitFor(() => {
+      expect(submittedPayload).not.toBeNull();
+    });
+
+    expect(submittedPayload.title).toBe('Diet Lemonade');
+    expect(submittedPayload.ingredients).toHaveLength(2);
+    expect(submittedPayload.ingredients[0].id).toBe('ing-uuid-1');
+    expect(submittedPayload.ingredients[1].id).toBe('ing-uuid-2');
+    expect(submittedPayload.nutrition).toBeDefined();
+    expect(submittedPayload.nutrition.calories).toBe(0);
+    expect(submittedPayload.nutrition.protein).toBe(0);
+    expect(submittedPayload.nutrition.fat).toBe(0);
   });
 });
