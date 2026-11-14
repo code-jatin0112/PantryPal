@@ -5,6 +5,7 @@ import { BrowserRouter } from 'react-router-dom';
 import MealPlanCard from '../components/mealPlans/MealPlanCard';
 import MealPlanSummary from '../components/mealPlans/MealPlanSummary';
 import NutritionSummary from '../components/mealPlans/NutritionSummary';
+import GroceryRequirements from '../components/mealPlans/GroceryRequirements';
 
 const mockPlan = {
   id: 'mp-test-1',
@@ -55,5 +56,36 @@ describe('Meal Plans Module Test Suite', () => {
     );
     expect(screen.getByText('Menu Breakdown')).toBeInTheDocument();
     expect(screen.getByText(/2 total dishes planned/i)).toBeInTheDocument();
+  });
+
+  it('renders meal plan card when dishes is provided under items', () => {
+    const planWithItems = {
+      id: 'mp-test-2',
+      name: 'Fallback Plan',
+      startDate: '2026-09-01',
+      endDate: '2026-09-07',
+      items: [
+        { id: 'i-1', dayOfWeek: 'MONDAY', mealType: 'DINNER', recipe: { title: 'Stew', servings: 2 } },
+      ],
+    };
+    render(
+      <BrowserRouter>
+        <MealPlanCard mealPlan={planWithItems} onDelete={vi.fn()} />
+      </BrowserRouter>
+    );
+    expect(screen.getByText('Fallback Plan')).toBeInTheDocument();
+    expect(screen.getByText(/1 meal/i)).toBeInTheDocument();
+  });
+
+  it('renders GroceryRequirements and displays missing items', () => {
+    const mockRequirements = {
+      missingItems: [
+        { name: 'Olive Oil', missingQuantity: 2, unit: 'tbsp', sourceRecipe: 'Tuscan Salmon' },
+      ],
+    };
+    render(<GroceryRequirements requirements={mockRequirements} mealPlanName="Mediterranean Plan" />);
+    expect(screen.getByText('Grocery Requirements')).toBeInTheDocument();
+    expect(screen.getByText('Olive Oil')).toBeInTheDocument();
+    expect(screen.getByText(/Need 2 tbsp/i)).toBeInTheDocument();
   });
 });

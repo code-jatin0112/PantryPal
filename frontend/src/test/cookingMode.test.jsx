@@ -4,6 +4,7 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import CookingProgress from '../components/cooking/CookingProgress';
 import StepCard from '../components/cooking/StepCard';
 import IngredientChecklist from '../components/cooking/IngredientChecklist';
+import CompletionModal from '../components/cooking/CompletionModal';
 
 const mockStep = {
   title: 'Step 1: Marinate Chicken',
@@ -78,5 +79,24 @@ describe('Cooking Mode Test Suite', () => {
 
     fireEvent.click(screen.getByText(/Greek Yogurt/i));
     expect(handleToggle).toHaveBeenCalledWith(1);
+  });
+
+  it('renders CompletionModal with celebration details', () => {
+    render(
+      <CompletionModal
+        isOpen={true}
+        onClose={vi.fn()}
+        recipeTitle="Tuscan Salmon"
+        totalTime={25}
+        servings={2}
+        onCookAgain={vi.fn()}
+        onBackToRecipes={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText(/Bon Appétit!/i)).toBeInTheDocument();
+    expect(screen.getByText('Tuscan Salmon')).toBeInTheDocument();
+    expect(screen.getByText('25 Mins Total')).toBeInTheDocument();
+    expect(screen.getByText('2 Portions')).toBeInTheDocument();
   });
 });
