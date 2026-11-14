@@ -172,6 +172,8 @@ const ShoppingList = () => {
           name: formData.name,
           quantity: formData.quantity,
           unit: formData.unit,
+          category: formData.category || 'Other',
+          priority: formData.priority || 'MEDIUM',
         });
         toast(`"${formData.name}" updated successfully!`, 'success');
       } else {
@@ -179,6 +181,8 @@ const ShoppingList = () => {
           name: formData.name,
           quantity: formData.quantity,
           unit: formData.unit,
+          category: formData.category || 'Other',
+          priority: formData.priority || 'MEDIUM',
         });
         toast(`"${formData.name}" added to shopping list! 🛒`, 'success');
       }

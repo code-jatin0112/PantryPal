@@ -6,6 +6,8 @@ export const createShoppingListItem = async ({
   name,
   quantity,
   unit,
+  category,
+  priority,
 }) => {
   if (recipeId) {
     const recipe = await prisma.recipe.findFirst({
@@ -27,6 +29,8 @@ export const createShoppingListItem = async ({
       name,
       quantity,
       unit,
+      category: category ? category.trim() : "Other",
+      priority: priority ? priority.trim().toUpperCase() : "MEDIUM",
     },
   });
 };
@@ -34,12 +38,20 @@ export const createShoppingListItem = async ({
 export const getShoppingListItems = async ({
   userId,
   isPurchased,
+  category,
+  priority,
 }) => {
   return prisma.shoppingListItem.findMany({
     where: {
       userId,
       ...(isPurchased !== undefined && {
         isPurchased,
+      }),
+      ...(category && category !== "All" && {
+        category,
+      }),
+      ...(priority && priority !== "ALL" && {
+        priority: priority.toUpperCase(),
       }),
     },
     orderBy: {
@@ -67,6 +79,8 @@ export const updateShoppingListItem = async ({
   quantity,
   unit,
   isPurchased,
+  category,
+  priority,
 }) => {
   const item = await prisma.shoppingListItem.findFirst({
     where: {
@@ -88,6 +102,10 @@ export const updateShoppingListItem = async ({
       ...(quantity !== undefined && { quantity }),
       ...(unit !== undefined && { unit }),
       ...(isPurchased !== undefined && { isPurchased }),
+      ...(category !== undefined && { category: category ? category.trim() : null }),
+      ...(priority !== undefined && {
+        priority: priority ? priority.trim().toUpperCase() : "MEDIUM",
+      }),
     },
   });
 };

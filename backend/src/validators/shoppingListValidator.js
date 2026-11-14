@@ -29,6 +29,19 @@ export const createShoppingListItemValidation = [
     .withMessage("Unit is required")
     .isLength({ max: 30 })
     .withMessage("Unit must not exceed 30 characters"),
+
+  body("category")
+    .optional({ nullable: true })
+    .trim()
+    .isLength({ max: 50 })
+    .withMessage("Category must not exceed 50 characters"),
+
+  body("priority")
+    .optional({ nullable: true })
+    .trim()
+    .toUpperCase()
+    .isIn(["HIGH", "MEDIUM", "LOW"])
+    .withMessage("Priority must be HIGH, MEDIUM, or LOW"),
 ];
 
 export const updateShoppingListItemValidation = [
@@ -59,6 +72,19 @@ export const updateShoppingListItemValidation = [
     .optional()
     .isBoolean()
     .withMessage("isPurchased must be a boolean"),
+
+  body("category")
+    .optional({ nullable: true })
+    .trim()
+    .isLength({ max: 50 })
+    .withMessage("Category must not exceed 50 characters"),
+
+  body("priority")
+    .optional({ nullable: true })
+    .trim()
+    .toUpperCase()
+    .isIn(["HIGH", "MEDIUM", "LOW"])
+    .withMessage("Priority must be HIGH, MEDIUM, or LOW"),
 ];
 
 export const shoppingListQueryValidation = [
@@ -66,4 +92,17 @@ export const shoppingListQueryValidation = [
     .optional()
     .isBoolean()
     .withMessage("isPurchased must be a boolean"),
+
+  query("category")
+    .optional()
+    .trim()
+    .isLength({ max: 50 })
+    .withMessage("Category must not exceed 50 characters"),
+
+  query("priority")
+    .optional()
+    .trim()
+    .toUpperCase()
+    .isIn(["ALL", "HIGH", "MEDIUM", "LOW"])
+    .withMessage("Priority must be ALL, HIGH, MEDIUM, or LOW"),
 ];
