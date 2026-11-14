@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ChefHat, ArrowLeft, Plus } from 'lucide-react';
+import { ChefHat, ArrowLeft, Plus, AlertCircle } from 'lucide-react';
 
 import CookingProgress from '../../components/cooking/CookingProgress';
 import StepCard from '../../components/cooking/StepCard';
@@ -31,6 +31,9 @@ const CookingMode = () => {
 
   const [loading, setLoading] = useState(true);
   const [completing, setCompleting] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncedStep, setSyncedStep] = useState(0);
+  const [syncError, setSyncError] = useState(null);
   const [recipe, setRecipe] = useState(null);
   const [steps, setSteps] = useState([]);
   const [ingredients, setIngredients] = useState([]);
@@ -46,7 +49,7 @@ const CookingMode = () => {
   // Storage key
   const storageKey = `pantrypal_cooking_${recipeId || recipe?.id || 'default'}`;
 
-  // 1. Fetch recipe from backend
+  // 1. Fetch recipe and initialize or resume cooking session
   useEffect(() => {
     let isMounted = true;
 
@@ -124,9 +127,13 @@ const CookingMode = () => {
           let session = null;
           try {
             const activeRes = await getActiveCookingSession(activeId);
-            session = activeRes.data?.data?.session || activeRes.data?.session;
-          } catch {
-            // No active session or endpoint 404, proceed to start
+            session = activeRes?.data?.session || activeRes?.session || null;
+          } catch (err) {
+            // Re-thrown errors represent genuine auth, server, or network errors
+            const errMsg = getErrorMessage(err, 'Failed to connect to active cooking session.');
+            toast(errMsg, 'error');
+            setSyncError(errMsg);
+            return;
           }
 
           if (!session) {
@@ -134,25 +141,52 @@ const CookingMode = () => {
               const startRes = await startCookingSession(activeId, {
                 servings: rData?.servings || 4,
               });
-              session = startRes.data?.data?.session || startRes.data?.session;
+              session = startRes.data?.session || startRes.session;
             } catch (err) {
-              if (err.response?.status === 409 && err.response?.data?.data?.session) {
-                session = err.response.data.data.session;
+              if (err.response?.status === 409 && (err.response?.data?.data?.session || err.response?.data?.session)) {
+                session = err.response.data.data?.session || err.response.data.session;
+              } else {
+                const errMsg = getErrorMessage(err, 'Failed to start cooking session.');
+                toast(errMsg, 'error');
+                setSyncError(errMsg);
+                return;
               }
             }
           }
 
           if (session?.id) {
             setBackendSessionId(session.id);
-            if (typeof session.currentStep === 'number' && session.currentStep >= 1) {
-              const uiStep = session.currentStep - 1;
-              setCurrentStepIndex(uiStep);
-              const prevCompleted = new Set();
-              for (let i = 0; i < uiStep; i++) {
-                prevCompleted.add(i);
-              }
-              setCompletedSteps(prevCompleted);
+            const serverStep = typeof session.currentStep === 'number' && session.currentStep >= 1
+              ? session.currentStep - 1
+              : 0;
+            setCurrentStepIndex(serverStep);
+            setSyncedStep(serverStep);
+            setSyncError(null);
+
+            const prevCompleted = new Set();
+            for (let i = 0; i < serverStep; i++) {
+              prevCompleted.add(i);
             }
+            setCompletedSteps(prevCompleted);
+
+            // Restore from localStorage if matching session
+            try {
+              const saved = localStorage.getItem(storageKey);
+              if (saved) {
+                const parsed = JSON.parse(saved);
+                if (parsed.backendSessionId === session.id) {
+                  if (Array.isArray(parsed.checkedIngredients)) {
+                    setCheckedIngredients(new Set(parsed.checkedIngredients));
+                  }
+                  if (typeof parsed.notes === 'string') {
+                    setNotes(parsed.notes);
+                  }
+                  if (typeof parsed.currentStep === 'number' && parsed.currentStep > serverStep) {
+                    setSyncError(`Local step (${parsed.currentStep + 1}) is unsynced with server (${serverStep + 1}).`);
+                  }
+                }
+              }
+            } catch {}
           }
         }
       } catch (err) {
@@ -169,23 +203,24 @@ const CookingMode = () => {
     };
   }, [recipeId]);
 
-  // 2. Load saved progress from localStorage
+  // 2. Load saved progress from localStorage if not already initialized
   useEffect(() => {
     try {
       const saved = localStorage.getItem(storageKey);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (typeof parsed.currentStep === 'number') setCurrentStepIndex(parsed.currentStep);
+        if (!backendSessionId && typeof parsed.currentStep === 'number') setCurrentStepIndex(parsed.currentStep);
         if (Array.isArray(parsed.completedSteps)) setCompletedSteps(new Set(parsed.completedSteps));
         if (Array.isArray(parsed.checkedIngredients)) setCheckedIngredients(new Set(parsed.checkedIngredients));
         if (typeof parsed.notes === 'string') setNotes(parsed.notes);
       }
     } catch {}
-  }, [storageKey]);
+  }, [storageKey, backendSessionId]);
 
   // 3. Save progress
   const saveProgress = useCallback(
-    (stepIdx, compSteps, chkIngs, notesText) => {
+    async (stepIdx, compSteps, chkIngs, notesText) => {
+      // 1. Immediately persist locally
       try {
         const stateToSave = {
           currentStep: stepIdx,
@@ -196,20 +231,50 @@ const CookingMode = () => {
           updatedAt: new Date().toISOString(),
         };
         localStorage.setItem(storageKey, JSON.stringify(stateToSave));
+      } catch {}
 
-        if (backendSessionId) {
+      // 2. Sync to backend if session is active
+      if (backendSessionId) {
+        setSyncing(true);
+        try {
           // Backend step index is 1-based (min: 1)
-          updateCookingProgress(backendSessionId, {
+          await updateCookingProgress(backendSessionId, {
             currentStep: stepIdx + 1,
             completedSteps: Array.from(compSteps),
-          }).catch((err) => {
-            console.error('Failed to sync cooking progress:', err);
           });
+          setSyncedStep(stepIdx);
+          setSyncError(null);
+        } catch (err) {
+          const msg = getErrorMessage(err, 'Failed to save progress to server.');
+          setSyncError(msg);
+          toast(`${msg} Progress saved locally only.`, 'warning');
+        } finally {
+          setSyncing(false);
         }
-      } catch {}
+      }
     },
-    [storageKey, backendSessionId]
+    [storageKey, backendSessionId, toast]
   );
+
+  const retrySyncProgress = async () => {
+    if (!backendSessionId) return;
+    setSyncing(true);
+    try {
+      await updateCookingProgress(backendSessionId, {
+        currentStep: currentStepIndex + 1,
+        completedSteps: Array.from(completedSteps),
+      });
+      setSyncedStep(currentStepIndex);
+      setSyncError(null);
+      toast('Progress synced with server! ☁️', 'success');
+    } catch (err) {
+      const msg = getErrorMessage(err, 'Failed to sync progress with server.');
+      setSyncError(msg);
+      toast(msg, 'error');
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   // Step navigation
   const handleNextStep = () => {
@@ -382,6 +447,27 @@ const CookingMode = () => {
         onExit={handleExit}
         onStepSelect={handleSelectStep}
       />
+
+      {/* ── Unsynced Server State / Retry Banner ── */}
+      {syncError && (
+        <div className="bg-amber-50 border border-amber-300 rounded-2xl p-3.5 sm:p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-amber-900 shadow-xs">
+          <div className="flex items-center gap-2.5">
+            <AlertCircle size={18} className="text-amber-600 flex-shrink-0" />
+            <div>
+              <span className="font-bold block">Progress not synced to server</span>
+              <span className="text-[11px] text-amber-800/90">{syncError}</span>
+            </div>
+          </div>
+          <button
+            type="button"
+            disabled={syncing}
+            onClick={retrySyncProgress}
+            className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white font-bold rounded-xl transition-colors cursor-pointer self-end sm:self-auto"
+          >
+            {syncing ? 'Syncing...' : 'Retry Sync'}
+          </button>
+        </div>
+      )}
 
       {/* ── Main 3-Column Studio Layout ── */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">

@@ -20,7 +20,12 @@ export const getActiveCookingSession = async (recipeId) => {
     const res = await api.get(COOKING.ACTIVE(recipeId));
     return res.data;
   } catch (err) {
-    return null;
+    // 404 specifically indicates that no active cooking session currently exists
+    if (err.response?.status === 404) {
+      return null;
+    }
+    // Re-throw authentication, authorization, server, or network errors
+    throw err;
   }
 };
 
