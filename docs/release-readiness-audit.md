@@ -37,7 +37,7 @@ All verification runs were executed against authorized local test databases (`pa
   - Interrupted deletion retry: Direct endpoint `/api/v1/auth/account/retry-deletion` and background reconciliation recover stranded accounts without leaking existence or allowing active account deletion.
 - **Rate Limiting**: `express-rate-limit` is configured globally (500 req/15 min) and sensitive actions (password change, account deletion) are restricted to 10 req/15 min via `getSensitiveActionLimiter`.
 - **CORS & Headers**: Helmet sets comprehensive CSP, HSTS, XSS filter, Frameguard (deny), and no-sniff headers. CORS enforces strict origin allowlisting with custom error mapping (403 `CORS_ORIGIN_NOT_ALLOWED`).
-- **Information Exposure**: Connection strings are redacted in logs and error messages using `sanitizeDatabaseUrl()`, stripping authority credentials and query-string parameters.
+- **Information Exposure**: Connection strings and credentials are redacted in guarded initialization, connection-error, and reconciliation paths using `sanitizeDatabaseUrl()`, stripping authority credentials and query-string parameters. However, credential redaction is not yet applied consistently across all backend logs (notably `errorHandler.js` which logs raw error objects via `console.error`, as identified in Finding 10).
 
 ### Area 2: Database & Data Integrity
 - **PostgreSQL & Prisma**: 16 cleanly applied migrations. Models define explicit foreign key cascades (`onDelete: Cascade`) across User, Pantry, PantryItem, Recipe, RecipeIngredient, RecipeNutrition, ShoppingListItem, MealPlan, MealPlanItem, RecipeFavorite, and CookingSession.
@@ -51,7 +51,7 @@ All verification runs were executed against authorized local test databases (`pa
 - **Cooking Mode & Guided Cooking**: State machine tracks active sessions, prevents duplicate active sessions (409), serializes step progression, and prevents updates once marked completed. Offline progress recovery handles localStorage synchronization.
 - **Shopping List**: Synchronizes with pantry items and meal-planning grocery calculation. Supports item categorization, priority levels (`LOW`, `MEDIUM`, `HIGH`), and purchased toggling.
 - **Meal Planning**: Date range validation, recipe ownership verification, multi-dish scheduling, and automatic missing grocery requirement calculation with pantry stock awareness.
-- **Profile & Settings**: Profile updates name and email, user preferences store dietary tags, allergies, disliked ingredients, budget, and serving targets with deduplication. GDPR data export packages all account entities.
+- **Profile & Settings**: Profile updates name and email, user preferences store dietary tags, allergies, disliked ingredients, budget, and serving targets with deduplication. Personal data export packages user profile, pantries, recipes, meal plans, and shopping lists; however, personal data export currently excludes `UnstructuredRecipe` records (as identified in Finding 1).
 
 ### Area 4: AI Features
 - **Recipe Generation & Kitchen Assistant**: Powered by `@google/genai` (Gemini 2.5 Flash). Inputs are validated via express-validator schemas; prompts include user-specific pantry and preference contexts.
@@ -93,7 +93,7 @@ All verification runs were executed against authorized local test databases (`pa
 
 ### Finding 1 [HIGH] — Incomplete Cross-Database Account Deletion for Unstructured Recipes
 - **Category**: Database & Data Integrity / Data Privacy
-- **File Reference**: [backend/src/services/authService.js](file:///Users/jatinkashyap/PantryPal/backend/src/services/authService.js#L285-L316), [backend/src/services/aiRecipeService.js](file:///Users/jatinkashyap/PantryPal/backend/src/services/aiRecipeService.js#L103), [backend/src/models/UnstructuredRecipe.js](file:///Users/jatinkashyap/PantryPal/backend/src/models/UnstructuredRecipe.js#L5)
+- **File Reference**: [backend/src/services/authService.js](../backend/src/services/authService.js#L285-L316), [backend/src/services/aiRecipeService.js](../backend/src/services/aiRecipeService.js#L103), [backend/src/models/UnstructuredRecipe.js](../backend/src/models/UnstructuredRecipe.js#L5)
 - **Description**:
   When users generate recipes via the AI service, `aiRecipeService.js` creates records in the MongoDB `UnstructuredRecipe` collection tagged with the user's `userId`. However, `deleteUserAccount()`, `retryAccountDeletion()`, and `reconcilePendingAccountDeletions()` in `authService.js` only execute `AiInteractionLog.deleteMany({ userId })`. They do not clean up `UnstructuredRecipe` documents.
   Additionally, `exportUserData()` in `authService.js` omits `UnstructuredRecipe` records from the GDPR user export archive.
@@ -111,7 +111,7 @@ All verification runs were executed against authorized local test databases (`pa
 
 ### Finding 2 [HIGH] — Production Runtime Failure Risk: `tsx` Classified as `devDependency`
 - **Category**: Deployment & CI/CD
-- **File Reference**: [backend/package.json](file:///Users/jatinkashyap/PantryPal/backend/package.json#L9) and line 35
+- **File Reference**: [backend/package.json](../backend/package.json#L9) and line 35
 - **Description**:
   The production startup script in `backend/package.json` is defined as:
   `"start": "prisma generate && prisma migrate deploy && tsx src/server.js"`
@@ -134,7 +134,7 @@ All verification runs were executed against authorized local test databases (`pa
 
 ### Finding 3 [MEDIUM] — Missing Authentication Rate Limiting on Login & Registration
 - **Category**: Authentication & Security
-- **File Reference**: [backend/src/routes/authRoutes.js](file:///Users/jatinkashyap/PantryPal/backend/src/routes/authRoutes.js#L28-L40)
+- **File Reference**: [backend/src/routes/authRoutes.js](../backend/src/routes/authRoutes.js#L28-L40)
 - **Description**:
   While `/change-password` and `/account` are protected by `sensitiveLimiter` (10 req/15 min), the public authentication entrypoints `POST /api/v1/auth/login` and `POST /api/v1/auth/register` are not configured with a dedicated limiter. They rely solely on the global rate limiter (500 req/15 min).
 - **Impact**:
@@ -149,7 +149,7 @@ All verification runs were executed against authorized local test databases (`pa
 
 ### Finding 4 [MEDIUM] — Unverified Immediate Profile Email Modification
 - **Category**: Authentication & Security
-- **File Reference**: [backend/src/services/authService.js](file:///Users/jatinkashyap/PantryPal/backend/src/services/authService.js#L141-L156)
+- **File Reference**: [backend/src/services/authService.js](../backend/src/services/authService.js#L141-L156)
 - **Description**:
   `updateUserProfile()` allows an active session to change the account email directly with no password verification or confirmation link. Furthermore, modifying the email does not increment `tokenVersion`.
 - **Impact**:
@@ -165,7 +165,7 @@ All verification runs were executed against authorized local test databases (`pa
 
 ### Finding 5 [MEDIUM] — Unbounded Rate Limiting on Cost-Intensive AI Generation Endpoints
 - **Category**: AI Features & Resource Management
-- **File Reference**: [backend/src/routes/aiChatRoutes.js](file:///Users/jatinkashyap/PantryPal/backend/src/routes/aiChatRoutes.js#L15), [backend/src/routes/aiRecipeRoutes.js](file:///Users/jatinkashyap/PantryPal/backend/src/routes/aiRecipeRoutes.js#L19), [backend/src/routes/aiRecommendationRoutes.js](file:///Users/jatinkashyap/PantryPal/backend/src/routes/aiRecommendationRoutes.js#L19)
+- **File Reference**: [backend/src/routes/aiChatRoutes.js](../backend/src/routes/aiChatRoutes.js#L15), [backend/src/routes/aiRecipeRoutes.js](../backend/src/routes/aiRecipeRoutes.js#L19), [backend/src/routes/aiRecommendationRoutes.js](../backend/src/routes/aiRecommendationRoutes.js#L19)
 - **Description**:
   Endpoints invoking Google GenAI Gemini APIs (`/api/v1/ai/chat`, `/api/v1/ai/recipes/generate`, and `/api/v1/ai/recommendations`) have no specialized rate limiter. They inherit the general API rate limit of 500 requests per 15 minutes.
 - **Impact**:
@@ -181,7 +181,7 @@ All verification runs were executed against authorized local test databases (`pa
 
 ### Finding 6 [MEDIUM] — Client-Server Timeout Asymmetry on AI Requests
 - **Category**: Frontend & Backend Integration
-- **File Reference**: [frontend/src/services/api.js](file:///Users/jatinkashyap/PantryPal/frontend/src/services/api.js#L7) vs [backend/src/services/aiService.js](file:///Users/jatinkashyap/PantryPal/backend/src/services/aiService.js#L8)
+- **File Reference**: [frontend/src/services/api.js](../frontend/src/services/api.js#L7) vs [backend/src/services/aiService.js](../backend/src/services/aiService.js#L8)
 - **Description**:
   The frontend Axios client configures a global timeout of 15,000ms (15 seconds):
   `timeout: 15000`
@@ -200,7 +200,7 @@ All verification runs were executed against authorized local test databases (`pa
 
 ### Finding 7 [MEDIUM] — Missing Top-Level React Error Boundary
 - **Category**: Frontend Reliability
-- **File Reference**: [frontend/src/main.jsx](file:///Users/jatinkashyap/PantryPal/frontend/src/main.jsx#L9-L18), [frontend/src/App.jsx](file:///Users/jatinkashyap/PantryPal/frontend/src/App.jsx#L94-L115)
+- **File Reference**: [frontend/src/main.jsx](../frontend/src/main.jsx#L9-L18), [frontend/src/App.jsx](../frontend/src/App.jsx#L94-L115)
 - **Description**:
   The frontend application does not implement a React Error Boundary (`componentDidCatch` or `getDerivedStateFromError`).
 - **Impact**:
@@ -215,7 +215,7 @@ All verification runs were executed against authorized local test databases (`pa
 
 ### Finding 8 [LOW] — Misleading Two-Factor Authentication UI Setting
 - **Category**: Frontend & User Expectations
-- **File Reference**: [frontend/src/pages/Settings/Settings.jsx](file:///Users/jatinkashyap/PantryPal/frontend/src/pages/Settings/Settings.jsx#L744-L749)
+- **File Reference**: [frontend/src/pages/Settings/Settings.jsx](../frontend/src/pages/Settings/Settings.jsx#L744-L749)
 - **Description**:
   The Settings page includes a toggle for "Two-Factor Authentication (2FA)" with description:
   *"Require an authentication code when signing into your PantryPal chef account"*.
@@ -229,7 +229,7 @@ All verification runs were executed against authorized local test databases (`pa
 
 ### Finding 9 [LOW] — Hardcoded Password Last Changed Label
 - **Category**: Frontend Polish
-- **File Reference**: [frontend/src/pages/Settings/Settings.jsx](file:///Users/jatinkashyap/PantryPal/frontend/src/pages/Settings/Settings.jsx#L761)
+- **File Reference**: [frontend/src/pages/Settings/Settings.jsx](../frontend/src/pages/Settings/Settings.jsx#L761)
 - **Description**:
   Under Account Password in Settings, the text displays static string `"Last changed 2 weeks ago"`.
 - **Impact**:
@@ -241,7 +241,7 @@ All verification runs were executed against authorized local test databases (`pa
 
 ### Finding 10 [LOW] — Unsanitized Console Logging in Express Error Handler
 - **Category**: Logging & Security
-- **File Reference**: [backend/src/middleware/errorHandler.js](file:///Users/jatinkashyap/PantryPal/backend/src/middleware/errorHandler.js#L2)
+- **File Reference**: [backend/src/middleware/errorHandler.js](../backend/src/middleware/errorHandler.js#L2)
 - **Description**:
   `errorHandler.js` logs raw error objects directly with `console.error(err)`.
 - **Impact**:
