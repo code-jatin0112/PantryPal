@@ -14,6 +14,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   backend-release-gate:
     name: Backend Release Gate (Tests, Schema & Migrations)
@@ -50,13 +53,17 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: backend/package-lock.json
 
       - name: Install Backend Dependencies
         working-directory: backend
         run: npm ci
+
+      - name: Generate Prisma Client
+        working-directory: backend
+        run: npx prisma generate
 
       - name: Validate Prisma Schema
         working-directory: backend
@@ -72,7 +79,7 @@ jobs:
 
       - name: Run Backend Integration & Unit Test Suite
         working-directory: backend
-        run: npm test
+        run: npm test -- --fileParallelism=false
 
       - name: Production Dependency Installation Smoke Test
         working-directory: backend
@@ -95,7 +102,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
@@ -147,7 +154,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Install Backend Dependencies & Migrate
         working-directory: backend
