@@ -4,6 +4,28 @@ import { generateAccessToken } from "../utils/token.js";
 import AppError from "../utils/AppError.js";
 import { sanitizeDatabaseUrl } from "../utils/testDatabaseGuard.js";
 
+export const cleanUserMongoData = async (targetUserId) => {
+  const { default: mongoose } = await import("mongoose");
+  const { connectMongo } = await import("../config/mongo.js");
+  if (mongoose.connection.readyState === 0) {
+    await connectMongo();
+  }
+  if (mongoose.connection.readyState !== 1) {
+    throw new Error("MongoDB connection unavailable");
+  }
+  const { AiInteractionLog } = await import("../models/AiInteractionLog.js");
+  const { UnstructuredRecipe } = await import("../models/UnstructuredRecipe.js");
+
+  const tasks = [];
+  if (AiInteractionLog) {
+    tasks.push(AiInteractionLog.deleteMany({ userId: targetUserId }));
+  }
+  if (UnstructuredRecipe) {
+    tasks.push(UnstructuredRecipe.deleteMany({ userId: targetUserId }));
+  }
+  await Promise.all(tasks);
+};
+
 export const registerUser = async ({ name, email, password }) => {
   const existingUser = await prisma.user.findUnique({
     where: { email },
@@ -282,26 +304,14 @@ export const deleteUserAccount = async ({ userId, password }) => {
     },
   });
 
-  // 2. Clean up NoSQL telemetry (MongoDB AI interaction logs)
+  // 2. Clean up NoSQL telemetry and AI recipes (MongoDB)
   if (process.env.MONGO_URI || process.env.MONGO_TEST_URI) {
     try {
-      const { default: mongoose } = await import("mongoose");
-      const { connectMongo } = await import("../config/mongo.js");
-      if (mongoose.connection.readyState === 0) {
-        await connectMongo();
-      }
-      if (mongoose.connection.readyState === 1) {
-        const { AiInteractionLog } = await import("../models/AiInteractionLog.js");
-        if (AiInteractionLog) {
-          await AiInteractionLog.deleteMany({ userId });
-        }
-      } else {
-        throw new Error("MongoDB connection unavailable");
-      }
+      await cleanUserMongoData(userId);
     } catch (mongoErr) {
       console.error(
-        "Failed to delete MongoDB AI logs during account deletion:",
-        mongoErr.message
+        "Failed to delete MongoDB data during account deletion:",
+        sanitizeDatabaseUrl(mongoErr.message)
       );
       await prisma.user.update({
         where: { id: userId },
@@ -385,21 +395,9 @@ export const retryAccountDeletion = async ({ email, password, userId }) => {
   let mongoSuccess = true;
   if (process.env.MONGO_URI || process.env.MONGO_TEST_URI) {
     try {
-      const { default: mongoose } = await import("mongoose");
-      const { connectMongo } = await import("../config/mongo.js");
-      if (mongoose.connection.readyState === 0) {
-        await connectMongo();
-      }
-      if (mongoose.connection.readyState === 1) {
-        const { AiInteractionLog } = await import("../models/AiInteractionLog.js");
-        if (AiInteractionLog) {
-          await AiInteractionLog.deleteMany({ userId: user.id });
-        }
-      } else {
-        mongoSuccess = false;
-      }
+      await cleanUserMongoData(user.id);
     } catch (err) {
-      console.warn("MongoDB retry cleanup failed:", err.message);
+      console.warn("MongoDB retry cleanup failed:", sanitizeDatabaseUrl(err.message));
       mongoSuccess = false;
     }
   }
@@ -495,19 +493,7 @@ export const reconcilePendingAccountDeletions = async () => {
       let mongoSuccess = true;
       if (process.env.MONGO_URI || process.env.MONGO_TEST_URI) {
         try {
-          const { default: mongoose } = await import("mongoose");
-          const { connectMongo } = await import("../config/mongo.js");
-          if (mongoose.connection.readyState === 0) {
-            await connectMongo();
-          }
-          if (mongoose.connection.readyState === 1) {
-            const { AiInteractionLog } = await import("../models/AiInteractionLog.js");
-            if (AiInteractionLog) {
-              await AiInteractionLog.deleteMany({ userId: user.id });
-            }
-          } else {
-            mongoSuccess = false;
-          }
+          await cleanUserMongoData(user.id);
         } catch (err) {
           console.warn(`[Reconciliation] MongoDB cleanup failed for user ${user.id}:`, sanitizeDatabaseUrl(err.message));
           mongoSuccess = false;
@@ -570,8 +556,9 @@ export const exportUserData = async ({ userId }) => {
     );
   }
 
-  // Fetch MongoDB AI interaction history scoped strictly to userId
+  // Fetch MongoDB AI interaction history and generated recipes scoped strictly to userId
   let aiLogs = [];
+  let unstructuredRecipes = [];
   let aiLogsStatus = "not_configured";
 
   if (process.env.MONGO_URI || process.env.MONGO_TEST_URI) {
@@ -583,17 +570,19 @@ export const exportUserData = async ({ userId }) => {
       }
       if (mongoose.connection.readyState === 1) {
         const { AiInteractionLog } = await import("../models/AiInteractionLog.js");
-        if (AiInteractionLog) {
-          aiLogs = await AiInteractionLog.find({ userId })
-            .select("-_id -__v")
-            .lean();
-          aiLogsStatus = "included";
-        }
+        const { UnstructuredRecipe } = await import("../models/UnstructuredRecipe.js");
+        const [logs, recipes] = await Promise.all([
+          AiInteractionLog ? AiInteractionLog.find({ userId }).select("-_id -__v").lean() : [],
+          UnstructuredRecipe ? UnstructuredRecipe.find({ userId }).select("-_id -__v").lean() : [],
+        ]);
+        aiLogs = logs || [];
+        unstructuredRecipes = recipes || [];
+        aiLogsStatus = "included";
       } else {
         aiLogsStatus = "unavailable";
       }
     } catch (err) {
-      console.warn("⚠️ Failed to export AI interaction logs from MongoDB:", err.message);
+      console.warn("⚠️ Failed to export AI interaction logs from MongoDB:", sanitizeDatabaseUrl(err.message));
       aiLogsStatus = "unavailable";
     }
   }
@@ -670,6 +659,7 @@ export const exportUserData = async ({ userId }) => {
     dataSources: {
       relational: "postgresql",
       telemetry: aiLogsStatus,
+      unstructuredRecipes: aiLogsStatus,
     },
     account: user,
     preferences: preferences
@@ -685,5 +675,7 @@ export const exportUserData = async ({ userId }) => {
     favorites,
     cookingSessions,
     aiInteractionHistory: aiLogs,
+    unstructuredRecipes,
+    aiGeneratedRecipes: unstructuredRecipes,
   };
 };
