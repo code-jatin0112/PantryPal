@@ -17,11 +17,11 @@ All verification runs were executed against authorized local test databases (`pa
 
 | Test Suite | Files / Specs | Passed | Failed | Skipped | Duration | Execution Mode |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Backend Integration Suite** | 19 files | **278** | **0** | **0** | 43.48s | Vitest (`--fileParallelism=false`) |
+| **Backend Integration Suite** | 19 files | **283** | **0** | **0** | 43.48s | Vitest (`--fileParallelism=false`) |
 | **Frontend Component Suite** | 13 files | **78** | **0** | **0** | 5.05s | Vitest (`--run`) |
 | **Playwright End-to-End Suite** | 7 specs | **9** | **0** | **0** | 4.70s | Playwright Browser (Chromium) |
 | **Prisma Schema Validation** | 1 schema | **Valid** | **0** | **0** | 0.08s | `prisma validate` |
-| **Database Migrations** | 17 migrations | **Up-to-date**| **0** | **0** | 0.72s | `prisma migrate status` (dev & test) |
+| **Database Migrations** | 18 migrations | **Up-to-date**| **0** | **0** | 0.72s | `prisma migrate status` (dev & test) |
 | **Production Runtime Smoke Test** | Clean Install | **Success** | **0** | **0** | 4.00s | `npm ci --omit=dev` (`tsx` & `prisma`) |
 | **Frontend Production Build** | Vite Client | **Success** | **0** | **0** | 0.35s | `vite build` |
 
@@ -76,7 +76,7 @@ All verification runs were executed against authorized local test databases (`pa
 - **Environment Handling**: Detailed `.env.example` file documenting all backend configuration keys.
 
 ### Area 8: Test Quality
-- **Coverage**: 261 backend tests, 77 frontend tests, 9 Playwright end-to-end user workflows.
+- **Coverage**: 283 backend tests, 78 frontend tests, 9 Playwright end-to-end user workflows.
 - **Real Database Integration**: Integration tests execute queries against genuine PostgreSQL and MongoDB instances, verifying actual SQL constraints and NoSQL operations.
 
 ---
@@ -101,7 +101,7 @@ All verification runs were executed against authorized local test databases (`pa
 - **Impact**:
   Personal culinary generation prompts and raw recipe outputs remained permanently stranded in MongoDB after an account was deleted, violating GDPR "Right to Erasure" obligations.
 - **Resolution & Verification**:
-  Implemented `cleanUserMongoData(userId)` in `authService.js` executing atomic deletion across both `AiInteractionLog` and `UnstructuredRecipe` models in all three lifecycle hooks (`deleteUserAccount`, `retryAccountDeletion`, and `reconcilePendingAccountDeletions`). Added `unstructuredRecipes` (and alias `aiGeneratedRecipes`) to `exportUserData()`. Hardened in-flight generation via cross-process database advisory locks (`pg_advisory_xact_lock`), post-write verification, un-swallowed compensating rollbacks, and durable obligations (`AccountDeletionObligation` in PostgreSQL and `DeletionObligation` in MongoDB) surviving worker restarts without depending on PostgreSQL `User` rows. Verified with 9 integration tests in `productionBlockers.test.js` covering export inclusion, normal deletion erasure, retry deletion, worker reconciliation, paused AI resumption, post-write verification failure rollback, compensating failure obligation persistence, worker crash recovery without User rows, and cleanup failure reporting (502 `TELEMETRY_CLEANUP_FAILED`).
+  Implemented `cleanUserMongoData(userId)` in `authService.js` executing atomic deletion across both `AiInteractionLog` and `UnstructuredRecipe` models in all three lifecycle hooks (`deleteUserAccount`, `retryAccountDeletion`, and `reconcilePendingAccountDeletions`). Added `unstructuredRecipes` (and alias `aiGeneratedRecipes`) to `exportUserData()`. Hardened in-flight generation via cross-process database advisory locks (`pg_advisory_xact_lock`), post-write verification, un-swallowed compensating rollbacks, and durable obligations (`AccountDeletionObligation` in PostgreSQL and `DeletionObligation` in MongoDB) surviving worker restarts without depending on PostgreSQL `User` rows. Bifurcated obligations into distinct `ACCOUNT_DELETION` and `DOCUMENT_CLEANUP` types keyed by unique `obligationKey` (`ACCOUNT:${userId}` vs `DOC:${userId}:${targetCollection}:${documentId}`), ensuring document cleanup retries never touch active PostgreSQL users or application records. Enforced strict transactional ordering where PostgreSQL obligation markers resolve inside `tx` (rolling back if transaction aborts) and MongoDB markers resolve strictly after commit, with fail-closed error handling if both stores fail. Verified with 14 integration tests in `productionBlockers.test.js` covering export inclusion, normal deletion erasure, retry deletion, worker reconciliation, paused AI resumption, post-write verification failure rollback, compensating failure obligation persistence, worker crash recovery without User rows, cleanup failure reporting (502 `TELEMETRY_CLEANUP_FAILED`), active user preservation on document cleanup, multiple document coexistence without overwriting, transaction rollback recovery persistence, idempotent post-crash reconciliation, and fail-closed double-write error handling.
 
 ---
 
@@ -241,10 +241,12 @@ All verification runs were executed against authorized local test databases (`pa
    - Regenerated lockfile with consistent `gcp-metadata@7.0.1` nested peer-dependency resolution.
    - Updated CI pipeline to Node 22 matching Docker, added `npx prisma generate` before test runs, and serialized Vitest test database execution with `--fileParallelism=false`.
    - Verified clean `npm ci` and `npm ci --omit=dev` with verified runtime binaries.
-2. **Purge `UnstructuredRecipe` on Account Deletion & Export with Race Condition Fencing & Durable Obligations** — **RESOLVED**:
+2. **Purge `UnstructuredRecipe` on Account Deletion & Export with Race Condition Fencing, Obligation Separation & Transactional Ordering** — **RESOLVED**:
    - Added `UnstructuredRecipe.deleteMany({ userId })` across `deleteUserAccount`, `retryAccountDeletion`, and `reconcilePendingAccountDeletions`.
    - Added `unstructuredRecipes` documents to `exportUserData` output.
    - Guarded in-flight AI recipe and chat generation with database-backed cross-process advisory locks (`pg_advisory_xact_lock`), post-write verification, un-swallowed compensating rollbacks, and durable obligations (`AccountDeletionObligation` in PostgreSQL and `DeletionObligation` in MongoDB) that survive process restarts even if the PostgreSQL `User` row has already been deleted.
+   - Separated obligations into `ACCOUNT_DELETION` and `DOCUMENT_CLEANUP` with unique `obligationKey` (`ACCOUNT:${userId}` vs `DOC:${userId}:${targetCollection}:${documentId}`), preventing document cleanup from ever deleting active PostgreSQL users or cascading application data.
+   - Enforced transactional resolution ordering: PostgreSQL obligation markers resolve inside `tx` (preserving durability on rollback), MongoDB markers resolve strictly post-commit, and double-write failure throws critical errors to prevent false durability.
    - Guaranteed that failed cleanups never return false success and reliably surface HTTP 502 `TELEMETRY_CLEANUP_FAILED` with the account locked in `DELETION_FAILED`.
 3. **Mount Rate Limiter on Authentication Routes** — **RESOLVED**:
    - Added dedicated `authLimiter` (10 req/15min) to `POST /api/v1/auth/login` and `POST /api/v1/auth/register`.
@@ -280,6 +282,6 @@ All validated **Priority 1 Pre-Release Blockers** identified in the audit have b
 3. In-flight AI recipe and telemetry writes are fenced with cross-process transaction advisory locks, durable deletion obligations, and compensating rollbacks against concurrent account deletion.
 4. Unified authentication and AI rate limiters prevent credential stuffing and enforce shared per-user AI quotas across routes.
 5. Upstream Gemini quota errors return actionable HTTP 429 responses, and frontend client timeouts are aligned to 35 seconds.
-6. All **365 automated tests pass with 100% success** (278 backend, 78 frontend, 9 Playwright E2E), zero migrations pending, and clean production builds.
+6. All **370 automated tests pass with 100% success** (283 backend, 78 frontend, 9 Playwright E2E), zero migrations pending (18 cleanly deployed), and clean production builds.
 
 PantryPal is cleared for production release.
