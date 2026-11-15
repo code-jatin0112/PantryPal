@@ -2,6 +2,7 @@ import prisma from "../config/database.js";
 import { hashPassword, comparePassword } from "../utils/password.js";
 import { generateAccessToken } from "../utils/token.js";
 import AppError from "../utils/AppError.js";
+import { sanitizeDatabaseUrl } from "../utils/testDatabaseGuard.js";
 
 export const registerUser = async ({ name, email, password }) => {
   const existingUser = await prisma.user.findUnique({
@@ -420,72 +421,123 @@ export const retryAccountDeletion = async ({ email, password, userId }) => {
   };
 };
 
+let isReconciliationRunning = false;
+
 /**
  * Server-side durable scheduled reconciliation.
  * Automatically recovers pending accounts across process restarts or network outages.
+ * Guarantees no overlapping runs and never throws unhandled rejections during outages.
  */
 export const reconcilePendingAccountDeletions = async () => {
-  const pendingUsers = await prisma.user.findMany({
-    where: {
-      deletionStatus: { in: ["PENDING_DELETION", "DELETION_FAILED"] },
-    },
-    select: {
-      id: true,
-      email: true,
-    },
-  });
-
-  if (pendingUsers.length === 0) {
-    return { reconciled: 0, failed: 0 };
+  if (isReconciliationRunning) {
+    console.log("[Reconciliation] Run skipped: previous reconciliation is still in progress.");
+    return { reconciled: 0, failed: 0, skipped: true };
   }
 
-  console.log(`[Reconciliation] Found ${pendingUsers.length} account(s) pending deletion finalization.`);
+  isReconciliationRunning = true;
+  try {
+    let pendingUsers = [];
+    try {
+      pendingUsers = await prisma.user.findMany({
+        where: {
+          deletionStatus: { in: ["PENDING_DELETION", "DELETION_FAILED"] },
+        },
+        select: {
+          id: true,
+          email: true,
+          deletionStatus: true,
+        },
+      });
+    } catch (queryErr) {
+      console.error(
+        "[Reconciliation] Failed to query pending accounts (temporary database outage):",
+        sanitizeDatabaseUrl(queryErr.message)
+      );
+      return { reconciled: 0, failed: 0, error: sanitizeDatabaseUrl(queryErr.message) };
+    }
 
-  let reconciled = 0;
-  let failed = 0;
+    if (!pendingUsers || pendingUsers.length === 0) {
+      return { reconciled: 0, failed: 0 };
+    }
 
-  for (const user of pendingUsers) {
-    let mongoSuccess = true;
-    if (process.env.MONGO_URI || process.env.MONGO_TEST_URI) {
+    console.log(`[Reconciliation] Found ${pendingUsers.length} account(s) pending deletion finalization.`);
+
+    let reconciled = 0;
+    let failed = 0;
+
+    for (const user of pendingUsers) {
+      // Re-verify that user has not been concurrently modified or finalized by another process
       try {
-        const { default: mongoose } = await import("mongoose");
-        const { connectMongo } = await import("../config/mongo.js");
-        if (mongoose.connection.readyState === 0) {
-          await connectMongo();
+        const freshUser = await prisma.user.findUnique({
+          where: { id: user.id },
+          select: { id: true, deletionStatus: true },
+        });
+
+        if (!freshUser || !["PENDING_DELETION", "DELETION_FAILED"].includes(freshUser.deletionStatus)) {
+          console.log(`[Reconciliation] User ${user.id} was already finalized or status changed concurrently. Skipping.`);
+          continue;
         }
-        if (mongoose.connection.readyState === 1) {
-          const { AiInteractionLog } = await import("../models/AiInteractionLog.js");
-          if (AiInteractionLog) {
-            await AiInteractionLog.deleteMany({ userId: user.id });
+      } catch (checkErr) {
+        console.warn(`[Reconciliation] Failed to check status for user ${user.id}:`, sanitizeDatabaseUrl(checkErr.message));
+        failed++;
+        continue;
+      }
+
+      let mongoSuccess = true;
+      if (process.env.MONGO_URI || process.env.MONGO_TEST_URI) {
+        try {
+          const { default: mongoose } = await import("mongoose");
+          const { connectMongo } = await import("../config/mongo.js");
+          if (mongoose.connection.readyState === 0) {
+            await connectMongo();
           }
-        } else {
+          if (mongoose.connection.readyState === 1) {
+            const { AiInteractionLog } = await import("../models/AiInteractionLog.js");
+            if (AiInteractionLog) {
+              await AiInteractionLog.deleteMany({ userId: user.id });
+            }
+          } else {
+            mongoSuccess = false;
+          }
+        } catch (err) {
+          console.warn(`[Reconciliation] MongoDB cleanup failed for user ${user.id}:`, sanitizeDatabaseUrl(err.message));
           mongoSuccess = false;
         }
-      } catch (err) {
-        console.warn(`[Reconciliation] MongoDB cleanup failed for user ${user.id}:`, err.message);
-        mongoSuccess = false;
       }
-    }
 
-    if (mongoSuccess) {
-      try {
-        await prisma.user.delete({ where: { id: user.id } });
-        console.log(`[Reconciliation] Successfully finalized deletion for user ${user.id}`);
-        reconciled++;
-      } catch (err) {
-        console.error(`[Reconciliation] PostgreSQL deletion failed for user ${user.id}:`, err.message);
+      if (mongoSuccess) {
+        try {
+          await prisma.user.delete({ where: { id: user.id } });
+          console.log(`[Reconciliation] Successfully finalized deletion for user ${user.id}`);
+          reconciled++;
+        } catch (err) {
+          if (err.code === "P2025") {
+            // Record was already deleted by another process or user retry
+            console.log(`[Reconciliation] User ${user.id} was already deleted by another process.`);
+            reconciled++;
+          } else {
+            console.error(`[Reconciliation] PostgreSQL deletion failed for user ${user.id}:`, sanitizeDatabaseUrl(err.message));
+            failed++;
+          }
+        }
+      } else {
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { deletionStatus: "DELETION_FAILED" },
+        }).catch((updateErr) => {
+          console.warn(`[Reconciliation] Failed to update user ${user.id} status:`, sanitizeDatabaseUrl(updateErr.message));
+        });
         failed++;
       }
-    } else {
-      await prisma.user.update({
-        where: { id: user.id },
-        data: { deletionStatus: "DELETION_FAILED" },
-      }).catch(() => {});
-      failed++;
     }
-  }
 
-  return { reconciled, failed };
+    return { reconciled, failed };
+  } catch (unexpectedErr) {
+    console.error("[Reconciliation] Unexpected error during reconciliation:", sanitizeDatabaseUrl(unexpectedErr.message));
+    return { reconciled: 0, failed: 0, error: sanitizeDatabaseUrl(unexpectedErr.message) };
+  } finally {
+    isReconciliationRunning = false;
+  }
 };
 
 export const exportUserData = async ({ userId }) => {

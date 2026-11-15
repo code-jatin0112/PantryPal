@@ -15,16 +15,9 @@ export const APPROVED_MONGO_PROTOCOLS = new Set(["mongodb:", "mongodb+srv:"]);
  * Sanitizes connection strings by redacting username and password.
  * Never includes credentials in thrown errors or logs.
  */
-export const sanitizeDatabaseUrl = (url = "") => {
-  if (!url || typeof url !== "string") return "";
-  try {
-    const parsed = new URL(url);
-    if (parsed.password) parsed.password = "******";
-    if (parsed.username) parsed.username = "******";
-    return parsed.toString();
-  } catch {
-    return url.replace(/:\/\/([^:@]+):([^@]+)@/, "://******:******@");
-  }
+export const sanitizeDatabaseUrl = (text = "") => {
+  if (!text || typeof text !== "string") return "";
+  return text.replace(/:\/\/([^:@\s\/]+):([^@\s\/]+)@/g, "://******:******@");
 };
 
 /**

@@ -439,4 +439,153 @@ describe("Durable Deletion Recovery & Strict Test Isolation Suite", () => {
       expect(orphanLogs.length).toBe(0);
     });
   });
+
+  // ── 5. Worker Reliability, Concurrency & Fault Tolerance ──────
+  describe("5. Worker Reliability, Concurrency & Fault Tolerance", () => {
+    it("handles database query rejection gracefully without throwing or leaking credentials", async () => {
+      const dbErrorWithSecret =
+        "FATAL: connection to server at 'postgresql://postgres:myDbSecretPassword999@localhost:5432/pantrypal_test' failed: connection timeout";
+
+      const findManySpy = vi
+        .spyOn(prisma.user, "findMany")
+        .mockRejectedValueOnce(new Error(dbErrorWithSecret));
+
+      let result;
+      let errorThrown = null;
+      try {
+        result = await reconcilePendingAccountDeletions();
+      } catch (err) {
+        errorThrown = err;
+      }
+
+      findManySpy.mockRestore();
+
+      // Must NOT throw unhandled rejection
+      expect(errorThrown).toBeNull();
+      expect(result).toBeDefined();
+      expect(result.reconciled).toBe(0);
+      expect(result.failed).toBe(0);
+      expect(result.error).toBeDefined();
+
+      // Credentials must be redacted
+      expect(result.error).not.toContain("myDbSecretPassword999");
+      expect(result.error).toContain("******:******");
+    });
+
+    it("survives temporary database outage and recovers automatically on subsequent run", async () => {
+      // 1. Outage: query fails
+      const findManySpy = vi
+        .spyOn(prisma.user, "findMany")
+        .mockRejectedValueOnce(new Error("Temporary PostgreSQL connection refused"));
+
+      const outageResult = await reconcilePendingAccountDeletions();
+      findManySpy.mockRestore();
+
+      expect(outageResult.reconciled).toBe(0);
+      expect(outageResult.error).toBeDefined();
+
+      // 2. Recovery: database is restored, pending user is created
+      const orphanPass = await hashPassword("RecoverAfterOutage123!");
+      const outageUser = await prisma.user.create({
+        data: {
+          name: "Outage Recovery User",
+          email: `outage-rec-${Date.now()}@pantrypal.test`,
+          password: orphanPass,
+          isActive: false,
+          deletionStatus: "PENDING_DELETION",
+          tokenVersion: 1,
+        },
+      });
+
+      // Subsequent execution recovers successfully
+      const recoveryResult = await reconcilePendingAccountDeletions();
+      expect(recoveryResult.error).toBeUndefined();
+      expect(recoveryResult.reconciled).toBeGreaterThanOrEqual(1);
+
+      const checkUser = await prisma.user.findUnique({ where: { id: outageUser.id } });
+      expect(checkUser).toBeNull();
+    });
+
+    it("prevents overlapping scheduled execution runs", async () => {
+      // Delay the findMany query to simulate a long-running reconciliation run
+      let resolveSlowQuery;
+      const slowQueryPromise = new Promise((resolve) => {
+        resolveSlowQuery = resolve;
+      });
+
+      const findManySpy = vi.spyOn(prisma.user, "findMany").mockImplementationOnce(async () => {
+        await slowQueryPromise;
+        return [];
+      });
+
+      // Launch run 1 (in-flight)
+      const run1Promise = reconcilePendingAccountDeletions();
+
+      // Launch run 2 while run 1 is still running
+      const run2Promise = reconcilePendingAccountDeletions();
+      const run2Result = await run2Promise;
+
+      // Run 2 must be skipped because Run 1 is in progress
+      expect(run2Result.skipped).toBe(true);
+
+      // Now resolve Run 1
+      resolveSlowQuery();
+      const run1Result = await run1Promise;
+      findManySpy.mockRestore();
+
+      expect(run1Result.skipped).toBeUndefined();
+
+      // Subsequent Run 3 after Run 1 finishes executes normally
+      const run3Result = await reconcilePendingAccountDeletions();
+      expect(run3Result.skipped).toBeUndefined();
+    });
+
+    it("successfully reconciles account after an initial MongoDB failure", async () => {
+      const userPass = await hashPassword("FailThenSucceedPass123!");
+      const retryUser = await prisma.user.create({
+        data: {
+          name: "Retry User Resilience",
+          email: `resilience-${Date.now()}@pantrypal.test`,
+          password: userPass,
+          isActive: false,
+          deletionStatus: "PENDING_DELETION",
+          tokenVersion: 1,
+        },
+      });
+
+      await AiInteractionLog.create({
+        userId: retryUser.id,
+        messagePrompt: "Temporary outage query",
+        intentDetected: "RECIPE_GENERATION",
+        aiResponse: "Temporary outage response",
+        tokenUsage: 15,
+      });
+
+      // 1. First run: MongoDB fails
+      const mongoSpy = vi
+        .spyOn(AiInteractionLog, "deleteMany")
+        .mockRejectedValueOnce(new Error("MongoDB simulated transient timeout"));
+
+      const failRunResult = await reconcilePendingAccountDeletions();
+      mongoSpy.mockRestore();
+
+      expect(failRunResult.failed).toBeGreaterThanOrEqual(1);
+
+      // User must remain locked in DELETION_FAILED
+      const userAfterFail = await prisma.user.findUnique({ where: { id: retryUser.id } });
+      expect(userAfterFail).toBeDefined();
+      expect(userAfterFail.deletionStatus).toBe("DELETION_FAILED");
+
+      // 2. Second run: MongoDB recovers, reconciliation succeeds
+      const succeedRunResult = await reconcilePendingAccountDeletions();
+      expect(succeedRunResult.reconciled).toBeGreaterThanOrEqual(1);
+
+      // User and logs must be fully purged
+      const userAfterSuccess = await prisma.user.findUnique({ where: { id: retryUser.id } });
+      expect(userAfterSuccess).toBeNull();
+
+      const logsAfterSuccess = await AiInteractionLog.find({ userId: retryUser.id });
+      expect(logsAfterSuccess.length).toBe(0);
+    });
+  });
 });
