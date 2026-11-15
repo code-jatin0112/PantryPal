@@ -11,13 +11,30 @@ export const APPROVED_TEST_DB_NAME = "pantrypal_test";
 export const APPROVED_POSTGRES_PROTOCOLS = new Set(["postgresql:", "postgres:"]);
 export const APPROVED_MONGO_PROTOCOLS = new Set(["mongodb:", "mongodb+srv:"]);
 
+// Connection-string parameters that drivers (e.g. pg, libpq) use to override destination
+const DESTINATION_OVERRIDE_PARAMS = new Set([
+  "host",
+  "hostaddr",
+  "socket",
+  "socketpath",
+  "socket_dir",
+]);
+
 /**
- * Sanitizes connection strings by redacting username and password.
+ * Sanitizes connection strings by redacting username, password, and sensitive query params.
+ * Handles authority-based credentials (user:pass@, :pass@, user@) and query parameters.
  * Never includes credentials in thrown errors or logs.
  */
 export const sanitizeDatabaseUrl = (text = "") => {
   if (!text || typeof text !== "string") return "";
-  return text.replace(/:\/\/([^:@\s\/]+):([^@\s\/]+)@/g, "://******:******@");
+  // Redact authority credentials: ://[user][:pass]@
+  let sanitized = text.replace(/:\/\/([^/?#\s@]*)(:[^/?#\s@]*)?@/g, "://******:******@");
+  // Redact credentials and secrets in query parameters
+  sanitized = sanitized.replace(
+    /([?&](?:password|pass|pwd|user|username|secret|token|apikey|api_key|auth|sslkey|sslpassword)=)([^&#\s]*)/gi,
+    "$1******"
+  );
+  return sanitized;
 };
 
 /**
@@ -57,6 +74,22 @@ export const isAuthorizedPostgresTestUrl = (url = "") => {
     const hostname = parsed.hostname.toLowerCase();
     if (!APPROVED_TEST_HOSTS.has(hostname)) {
       return false;
+    }
+
+    // Reject driver destination overrides via query parameters
+    for (const [key, val] of parsed.searchParams.entries()) {
+      const lowerKey = key.toLowerCase();
+      if (DESTINATION_OVERRIDE_PARAMS.has(lowerKey)) {
+        if (lowerKey === "host" || lowerKey === "hostaddr") {
+          const lowerVal = (val || "").trim().toLowerCase();
+          if (!APPROVED_TEST_HOSTS.has(lowerVal)) {
+            return false;
+          }
+        } else {
+          // Socket overrides bypass host checking and must be rejected
+          return false;
+        }
+      }
     }
 
     // Validate exact database name (must be exactly 'pantrypal_test')
@@ -106,6 +139,23 @@ export const isAuthorizedMongoTestUri = (uri = "") => {
     const hostname = parsed.hostname.toLowerCase();
     if (!APPROVED_TEST_HOSTS.has(hostname)) {
       return false;
+    }
+
+    // Check for driver destination overrides in searchParams if present
+    if (parsed.searchParams) {
+      for (const [key, val] of parsed.searchParams.entries()) {
+        const lowerKey = key.toLowerCase();
+        if (DESTINATION_OVERRIDE_PARAMS.has(lowerKey)) {
+          if (lowerKey === "host" || lowerKey === "hostaddr") {
+            const lowerVal = (val || "").trim().toLowerCase();
+            if (!APPROVED_TEST_HOSTS.has(lowerVal)) {
+              return false;
+            }
+          } else {
+            return false;
+          }
+        }
+      }
     }
 
     const dbName = parsed.pathname.replace(/^\//, "").split("?")[0];

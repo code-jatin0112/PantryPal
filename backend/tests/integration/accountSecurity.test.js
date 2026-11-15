@@ -226,6 +226,40 @@ describe("Account Management & Security Integration Tests (Phase 5 Hardening)", 
       expect(res.body.error.code).toBe("VALIDATION_ERROR");
     });
 
+    it("rejects password change when new password produces identical bcrypt hash (e.g. differing only after 72 bytes)", async () => {
+      const longBase = "A".repeat(72);
+      const pass1 = longBase + "suffix1!";
+      const pass2 = longBase + "suffix2!";
+      const hashedPass1 = await hashPassword(pass1);
+
+      const collisionUser = await prisma.user.create({
+        data: {
+          name: "Collision Test User",
+          email: `collision-${Date.now()}@pantrypal.test`,
+          password: hashedPass1,
+          isActive: true,
+        },
+      });
+      const collisionToken = generateAccessToken(collisionUser.id, 0);
+
+      try {
+        const res = await supertest(app)
+          .post("/api/v1/auth/change-password")
+          .set("Authorization", `Bearer ${collisionToken}`)
+          .send({
+            currentPassword: pass1,
+            newPassword: pass2,
+            confirmPassword: pass2,
+          });
+
+        expect(res.status).toBe(400);
+        expect(res.body.success).toBe(false);
+        expect(res.body.error.code).toBe("PASSWORD_UNCHANGED");
+      } finally {
+        await prisma.user.deleteMany({ where: { id: collisionUser.id } });
+      }
+    });
+
     it("rejects password change when confirmPassword does not match", async () => {
       const res = await supertest(app)
         .post("/api/v1/auth/change-password")

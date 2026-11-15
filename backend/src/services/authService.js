@@ -207,6 +207,15 @@ export const changeUserPassword = async ({
     );
   }
 
+  const isSamePassword = await comparePassword(newPassword, user.password);
+  if (isSamePassword) {
+    throw new AppError(
+      "New password must be different from current password",
+      400,
+      "PASSWORD_UNCHANGED"
+    );
+  }
+
   const hashedPassword = await hashPassword(newPassword);
 
   // Increment tokenVersion to invalidate existing tokens across all sessions/devices

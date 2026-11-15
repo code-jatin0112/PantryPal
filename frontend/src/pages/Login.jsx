@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useForm } from 'react-hook-form';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
@@ -22,6 +22,7 @@ const Login = () => {
   const [pendingDeletionAccount, setPendingDeletionAccount] = useState(null);
   const [recoveryStatus, setRecoveryStatus] = useState('idle'); // 'idle' | 'submitting' | 'success' | 'error'
   const [recoveryMessage, setRecoveryMessage] = useState('');
+  const recoveryReqIdRef = useRef(0);
   const {
     register,
     handleSubmit,
@@ -30,6 +31,7 @@ const Login = () => {
 
   const onSubmit = async (data) => {
     try {
+      recoveryReqIdRef.current += 1;
       setErrorMsg('');
       setPendingDeletionAccount(null);
       setRecoveryStatus('idle');
@@ -53,6 +55,7 @@ const Login = () => {
       return;
     }
 
+    const reqId = ++recoveryReqIdRef.current;
     setRecoveryStatus('submitting');
     setRecoveryMessage('');
 
@@ -62,12 +65,16 @@ const Login = () => {
         password: pendingDeletionAccount.password,
       });
 
+      if (recoveryReqIdRef.current !== reqId) return;
+
       setRecoveryStatus('success');
       setRecoveryMessage(
         res?.message || 'Account deletion finalized successfully. All account records and data have been permanently removed.'
       );
-      setPendingDeletionAccount((prev) => ({ email: prev.email, password: '' }));
+      setPendingDeletionAccount((prev) => (prev ? { email: prev.email, password: '' } : null));
     } catch (err) {
+      if (recoveryReqIdRef.current !== reqId) return;
+
       setRecoveryStatus('error');
       const msg =
         err.response?.data?.error?.message ||
@@ -225,6 +232,7 @@ const Login = () => {
                         <button
                           type="button"
                           onClick={() => {
+                            recoveryReqIdRef.current += 1;
                             setPendingDeletionAccount(null);
                             setRecoveryStatus('idle');
                             setRecoveryMessage('');

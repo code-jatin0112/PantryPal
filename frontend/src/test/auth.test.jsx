@@ -240,5 +240,67 @@ describe('Authentication & Protected Routes Suite', () => {
         ).not.toBeInTheDocument();
       });
     });
+
+    it('ignores stale deletion recovery response if user dismisses banner before resolution', async () => {
+      vi.spyOn(api, 'post').mockRejectedValueOnce({
+        response: {
+          status: 403,
+          data: {
+            error: {
+              code: 'ACCOUNT_PENDING_DELETION',
+              message: 'This account is scheduled for deletion.',
+            },
+          },
+        },
+      });
+
+      let resolveRetry;
+      const retryPromise = new Promise((resolve) => {
+        resolveRetry = resolve;
+      });
+      vi.spyOn(authService, 'retryAccountDeletion').mockReturnValueOnce(retryPromise);
+
+      render(
+        <MemoryRouter>
+          <ToastProvider>
+            <AuthProvider>
+              <Login />
+            </AuthProvider>
+          </ToastProvider>
+        </MemoryRouter>
+      );
+
+      const emailInput = screen.getByLabelText(/Email address/i);
+      const passwordInput = screen.getByLabelText(/^Password$/i);
+      const submitBtn = screen.getByRole('button', { name: /Sign In/i });
+
+      await userEvent.type(emailInput, 'pending-user@pantrypal.app');
+      await userEvent.type(passwordInput, 'Password123!');
+      fireEvent.click(submitBtn);
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /Finalize Account Deletion Now/i })).toBeInTheDocument();
+      });
+
+      const finalizeBtn = screen.getByRole('button', { name: /Finalize Account Deletion Now/i });
+      fireEvent.click(finalizeBtn);
+
+      // Dismiss banner while retry request is in flight
+      const dismissBtn = screen.getByRole('button', { name: /Dismiss/i });
+      fireEvent.click(dismissBtn);
+
+      // Verify banner is gone
+      expect(screen.queryByText('Account Scheduled for Deletion')).not.toBeInTheDocument();
+
+      // Resolve the in-flight retry promise
+      resolveRetry({
+        status: 'COMPLETED',
+        message: 'Account deletion finalized successfully. All records permanently purged.',
+      });
+
+      // Assert no crash occurred and stale message does not resurrect
+      await new Promise((r) => setTimeout(r, 50));
+      expect(screen.queryByText(/Account deletion finalized successfully/i)).not.toBeInTheDocument();
+    });
   });
 });

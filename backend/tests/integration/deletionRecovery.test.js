@@ -106,7 +106,80 @@ describe("Durable Deletion Recovery & Strict Test Isolation Suite", () => {
       }
     });
 
-    it("redacts credentials from error messages and logs", async () => {
+    it("rejects database URLs with destination override parameters (host, hostaddr, socket)", () => {
+      // Remote host override via query parameter
+      expect(
+        isAuthorizedPostgresTestUrl(
+          "postgresql://localhost:5432/pantrypal_test?host=shared-db.example.org"
+        )
+      ).toBe(false);
+      expect(
+        isAuthorizedPostgresTestUrl(
+          "postgresql://127.0.0.1:5432/pantrypal_test?host=remote.db.com"
+        )
+      ).toBe(false);
+
+      // Multiple host parameters (parameter pollution) with any non-approved host
+      expect(
+        isAuthorizedPostgresTestUrl(
+          "postgresql://localhost:5432/pantrypal_test?host=localhost&host=evil.com"
+        )
+      ).toBe(false);
+
+      // hostaddr override to non-approved IP
+      expect(
+        isAuthorizedPostgresTestUrl(
+          "postgresql://localhost:5432/pantrypal_test?hostaddr=10.0.0.1"
+        )
+      ).toBe(false);
+      expect(
+        isAuthorizedPostgresTestUrl(
+          "postgresql://localhost:5432/pantrypal_test?hostaddr=192.168.1.100"
+        )
+      ).toBe(false);
+
+      // Socket overrides (bypass host checking) must be rejected
+      expect(
+        isAuthorizedPostgresTestUrl(
+          "postgresql://localhost:5432/pantrypal_test?socket=/var/run/postgresql"
+        )
+      ).toBe(false);
+      expect(
+        isAuthorizedPostgresTestUrl(
+          "postgresql://localhost:5432/pantrypal_test?socketpath=/tmp/pg.sock"
+        )
+      ).toBe(false);
+      expect(
+        isAuthorizedPostgresTestUrl(
+          "postgresql://localhost:5432/pantrypal_test?socket_dir=/var/run/pg"
+        )
+      ).toBe(false);
+
+      // Valid test connections with approved host or standard harmless parameters still pass
+      expect(
+        isAuthorizedPostgresTestUrl(
+          "postgresql://localhost:5432/pantrypal_test?schema=public&sslmode=disable"
+        )
+      ).toBe(true);
+      expect(
+        isAuthorizedPostgresTestUrl(
+          "postgresql://localhost:5432/pantrypal_test?host=127.0.0.1"
+        )
+      ).toBe(true);
+      expect(
+        isAuthorizedPostgresTestUrl(
+          "postgresql://localhost:5432/pantrypal_test?host=localhost"
+        )
+      ).toBe(true);
+      expect(
+        isAuthorizedPostgresTestUrl(
+          "postgresql://localhost:5432/pantrypal_test?hostaddr=127.0.0.1"
+        )
+      ).toBe(true);
+    });
+
+    it("redacts credentials from error messages and logs (authority and query parameters)", async () => {
+      // Standard authority user:pass
       const urlWithSecret = "postgresql://secretUser:superSecretPassword123@remotehost:5432/pantrypal_test";
       const sanitized = sanitizeDatabaseUrl(urlWithSecret);
 
@@ -114,9 +187,40 @@ describe("Durable Deletion Recovery & Strict Test Isolation Suite", () => {
       expect(sanitized).not.toContain("secretUser");
       expect(sanitized).toContain("******:******");
 
+      // Password without username (:password@)
+      const emptyUserUrl = "postgresql://:realPassword@remotehost/pantrypal_test";
+      const sanitizedEmptyUser = sanitizeDatabaseUrl(emptyUserUrl);
+      expect(sanitizedEmptyUser).not.toContain("realPassword");
+      expect(sanitizedEmptyUser).toBe("postgresql://******:******@remotehost/pantrypal_test");
+
+      // Username only (user@)
+      const userOnlyUrl = "postgresql://secretUser@remotehost/pantrypal_test";
+      const sanitizedUserOnly = sanitizeDatabaseUrl(userOnlyUrl);
+      expect(sanitizedUserOnly).not.toContain("secretUser");
+      expect(sanitizedUserOnly).toBe("postgresql://******:******@remotehost/pantrypal_test");
+
+      // Query-string credentials
+      const queryParamUrl = "postgresql://remotehost:5432/pantrypal_test?user=secretUser&password=superSecretPassword123&token=secretToken";
+      const sanitizedQueryParams = sanitizeDatabaseUrl(queryParamUrl);
+      expect(sanitizedQueryParams).not.toContain("secretUser");
+      expect(sanitizedQueryParams).not.toContain("superSecretPassword123");
+      expect(sanitizedQueryParams).not.toContain("secretToken");
+      expect(sanitizedQueryParams).toContain("user=******");
+      expect(sanitizedQueryParams).toContain("password=******");
+      expect(sanitizedQueryParams).toContain("token=******");
+
+      // MongoDB with query param credentials
+      const mongoUrl = "mongodb://localhost:27017/pantrypal_test?authSource=admin&user=adminUser&pass=adminSecret";
+      const sanitizedMongo = sanitizeDatabaseUrl(mongoUrl);
+      expect(sanitizedMongo).not.toContain("adminUser");
+      expect(sanitizedMongo).not.toContain("adminSecret");
+      expect(sanitizedMongo).toContain("user=******");
+      expect(sanitizedMongo).toContain("pass=******");
+
+      // assertAuthorizedTestDatabase rejects unauthorized URL and diagnostic message redacts all query credentials
       const origPostgres = process.env.TEST_DATABASE_URL;
       try {
-        process.env.TEST_DATABASE_URL = urlWithSecret;
+        process.env.TEST_DATABASE_URL = "postgresql://localhost:5432/pantrypal_test?host=shared-db.example.org&user=secretUser&password=superSecretPassword123";
         let thrownError = null;
         try {
           await assertAuthorizedTestDatabase(prisma);
@@ -127,7 +231,8 @@ describe("Durable Deletion Recovery & Strict Test Isolation Suite", () => {
         expect(thrownError).toBeDefined();
         expect(thrownError.message).not.toContain("superSecretPassword123");
         expect(thrownError.message).not.toContain("secretUser");
-        expect(thrownError.message).toContain("******:******");
+        expect(thrownError.message).toContain("user=******");
+        expect(thrownError.message).toContain("password=******");
       } finally {
         process.env.TEST_DATABASE_URL = origPostgres;
       }
@@ -210,18 +315,18 @@ describe("Durable Deletion Recovery & Strict Test Isolation Suite", () => {
 
   // ── 3. Partial Failure, Session Loss, and Identity-Verified Retry ─
   describe("3. Partial Failure, Session Loss, and Identity-Verified Retry", () => {
-    let strandedUser;
-    let strandedToken;
-    const strandedPassword = "StrandedPassword123!";
+    const testPassword = "StrandedPassword123!";
 
-    beforeAll(async () => {
-      const hashedPass = await hashPassword(strandedPassword);
-      strandedUser = await prisma.user.create({
+    const createTestUser = async ({ isActive = true, deletionStatus = null, tokenVersion = 0 } = {}) => {
+      const hashedPass = await hashPassword(testPassword);
+      const user = await prisma.user.create({
         data: {
           name: "Stranded Chef Recovery",
-          email: `stranded-${Date.now()}@pantrypal.test`,
+          email: `stranded-${Date.now()}-${Math.random().toString(36).slice(2, 7)}@pantrypal.test`,
           password: hashedPass,
-          isActive: true,
+          isActive,
+          deletionStatus,
+          tokenVersion,
           pantries: {
             create: {
               name: "Stranded Pantry",
@@ -229,20 +334,22 @@ describe("Durable Deletion Recovery & Strict Test Isolation Suite", () => {
           },
         },
       });
+      const token = generateAccessToken(user.id, tokenVersion);
+      return { user, token };
+    };
 
-      strandedToken = generateAccessToken(strandedUser.id, 0);
+    it("handles MongoDB failure: sets DELETION_FAILED, locks out user, returns 502", async () => {
+      const { user, token } = await createTestUser({ isActive: true, deletionStatus: null, tokenVersion: 0 });
 
       // Create an AI interaction log in MongoDB
       await AiInteractionLog.create({
-        userId: strandedUser.id,
+        userId: user.id,
         messagePrompt: "How do I make beef bourguignon?",
         intentDetected: "KITCHEN_ASSISTANT",
         aiResponse: "Here is the recipe...",
         tokenUsage: 100,
       });
-    });
 
-    it("handles MongoDB failure: sets DELETION_FAILED, locks out user, returns 502", async () => {
       // Simulate MongoDB network partition
       vi.spyOn(AiInteractionLog, "deleteMany").mockRejectedValueOnce(
         new Error("Simulated Atlas network partition")
@@ -250,15 +357,15 @@ describe("Durable Deletion Recovery & Strict Test Isolation Suite", () => {
 
       const delRes = await supertest(app)
         .delete("/api/v1/auth/account")
-        .set("Authorization", `Bearer ${strandedToken}`)
-        .send({ password: strandedPassword });
+        .set("Authorization", `Bearer ${token}`)
+        .send({ password: testPassword });
 
       expect(delRes.status).toBe(502);
       expect(delRes.body.error.code).toBe("TELEMETRY_CLEANUP_FAILED");
 
       // Verify user state: locked out in PostgreSQL
       const userInDb = await prisma.user.findUnique({
-        where: { id: strandedUser.id },
+        where: { id: user.id },
       });
       expect(userInDb).toBeDefined();
       expect(userInDb.isActive).toBe(false);
@@ -266,25 +373,37 @@ describe("Durable Deletion Recovery & Strict Test Isolation Suite", () => {
       expect(userInDb.tokenVersion).toBe(1);
 
       // MongoDB telemetry record must still exist
-      const remainingLogs = await AiInteractionLog.find({ userId: strandedUser.id });
+      const remainingLogs = await AiInteractionLog.find({ userId: user.id });
       expect(remainingLogs.length).toBe(1);
     });
 
     it("rejects normal protected routes with 401 USER_NOT_AVAILABLE for pending account", async () => {
+      const { token } = await createTestUser({
+        isActive: false,
+        deletionStatus: "PENDING_DELETION",
+        tokenVersion: 1,
+      });
+
       const profileRes = await supertest(app)
         .get("/api/v1/auth/me")
-        .set("Authorization", `Bearer ${strandedToken}`);
+        .set("Authorization", `Bearer ${token}`);
 
       expect(profileRes.status).toBe(401);
       expect(profileRes.body.error.code).toBe("USER_NOT_AVAILABLE");
     });
 
     it("login attempt returns 403 ACCOUNT_PENDING_DELETION", async () => {
+      const { user } = await createTestUser({
+        isActive: false,
+        deletionStatus: "PENDING_DELETION",
+        tokenVersion: 1,
+      });
+
       const loginRes = await supertest(app)
         .post("/api/v1/auth/login")
         .send({
-          email: strandedUser.email,
-          password: strandedPassword,
+          email: user.email,
+          password: testPassword,
         });
 
       expect(loginRes.status).toBe(403);
@@ -292,12 +411,26 @@ describe("Durable Deletion Recovery & Strict Test Isolation Suite", () => {
     });
 
     it("pending deletion can be retried after session loss with verified credentials", async () => {
+      const { user } = await createTestUser({
+        isActive: false,
+        deletionStatus: "PENDING_DELETION",
+        tokenVersion: 1,
+      });
+
+      await AiInteractionLog.create({
+        userId: user.id,
+        messagePrompt: "Stranded recipe prompt",
+        intentDetected: "KITCHEN_ASSISTANT",
+        aiResponse: "Stranded recipe response",
+        tokenUsage: 80,
+      });
+
       // User lost their token after session loss / page reload
       const retryRes = await supertest(app)
         .post("/api/v1/auth/account/retry-deletion")
         .send({
-          email: strandedUser.email,
-          password: strandedPassword,
+          email: user.email,
+          password: testPassword,
         });
 
       expect(retryRes.status).toBe(200);
@@ -305,17 +438,17 @@ describe("Durable Deletion Recovery & Strict Test Isolation Suite", () => {
 
       // Verify PostgreSQL user and cascaded pantry are deleted
       const checkUser = await prisma.user.findUnique({
-        where: { id: strandedUser.id },
+        where: { id: user.id },
       });
       expect(checkUser).toBeNull();
 
       const checkPantries = await prisma.pantry.findMany({
-        where: { userId: strandedUser.id },
+        where: { userId: user.id },
       });
       expect(checkPantries.length).toBe(0);
 
       // Verify MongoDB AI interaction logs are purged
-      const logs = await AiInteractionLog.find({ userId: strandedUser.id });
+      const logs = await AiInteractionLog.find({ userId: user.id });
       expect(logs.length).toBe(0);
     });
   });
@@ -401,7 +534,8 @@ describe("Durable Deletion Recovery & Strict Test Isolation Suite", () => {
 
       // User B is completely untouched
       const checkB = await prisma.user.findUnique({ where: { id: userB.id } });
-      expect(checkB).toBeDefined();
+      expect(checkB).not.toBeNull();
+      expect(checkB.id).toBe(userB.id);
       const logsB = await AiInteractionLog.find({ userId: userB.id });
       expect(logsB.length).toBe(1);
     });
