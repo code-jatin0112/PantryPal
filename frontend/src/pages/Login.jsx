@@ -4,7 +4,8 @@ import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useAuth } from '../context/AuthContext';
 import { getErrorMessage } from '../utils/errorHandler';
-import { Eye, EyeOff, Mail, Lock, ChefHat, Sparkles, ArrowRight } from 'lucide-react';
+import { retryAccountDeletion } from '../services/authService';
+import { Eye, EyeOff, Mail, Lock, ChefHat, Sparkles, ArrowRight, AlertTriangle, CheckCircle2 } from 'lucide-react';
 
 // ── Decorative feature list shown on the left panel ──────
 const FEATURES = [
@@ -18,6 +19,9 @@ const Login = () => {
   const { login } = useAuth();
   const [showPassword, setShowPassword] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [pendingDeletionAccount, setPendingDeletionAccount] = useState(null);
+  const [recoveryStatus, setRecoveryStatus] = useState('idle'); // 'idle' | 'submitting' | 'success' | 'error'
+  const [recoveryMessage, setRecoveryMessage] = useState('');
   const {
     register,
     handleSubmit,
@@ -27,9 +31,49 @@ const Login = () => {
   const onSubmit = async (data) => {
     try {
       setErrorMsg('');
+      setPendingDeletionAccount(null);
+      setRecoveryStatus('idle');
+      setRecoveryMessage('');
       await login(data.email, data.password);
     } catch (err) {
-      setErrorMsg(getErrorMessage(err, 'Invalid email or password.'));
+      const errorCode = err.response?.data?.error?.code || err.response?.data?.code;
+      if (errorCode === 'ACCOUNT_PENDING_DELETION') {
+        setPendingDeletionAccount({ email: data.email, password: data.password });
+        setErrorMsg('');
+      } else {
+        setErrorMsg(getErrorMessage(err, 'Invalid email or password.'));
+      }
+    }
+  };
+
+  const handleFinalizeDeletion = async () => {
+    if (!pendingDeletionAccount?.email || !pendingDeletionAccount?.password) {
+      setRecoveryStatus('error');
+      setRecoveryMessage('Email and password verification required to finalize deletion.');
+      return;
+    }
+
+    setRecoveryStatus('submitting');
+    setRecoveryMessage('');
+
+    try {
+      const res = await retryAccountDeletion({
+        email: pendingDeletionAccount.email,
+        password: pendingDeletionAccount.password,
+      });
+
+      setRecoveryStatus('success');
+      setRecoveryMessage(
+        res?.message || 'Account deletion finalized successfully. All account records and data have been permanently removed.'
+      );
+      setPendingDeletionAccount((prev) => ({ email: prev.email, password: '' }));
+    } catch (err) {
+      setRecoveryStatus('error');
+      const msg =
+        err.response?.data?.error?.message ||
+        err.message ||
+        'Telemetry cleanup failed during retry. Please retry or contact support.';
+      setRecoveryMessage(msg);
     }
   };
 
@@ -124,6 +168,78 @@ const Login = () => {
             <h2 className="page-title">Welcome back</h2>
             <p className="page-subtitle mt-1">Sign in to your kitchen dashboard</p>
           </div>
+
+          {/* Pending Deletion Recovery Banner */}
+          {pendingDeletionAccount && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.97 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="bg-amber-50 border border-amber-300 text-amber-950 rounded-2xl p-5 mb-6 shadow-sm"
+              role="alert"
+            >
+              <div className="flex items-start gap-3">
+                <div className="w-9 h-9 rounded-xl bg-amber-200 text-amber-900 flex items-center justify-center flex-shrink-0 mt-0.5">
+                  <AlertTriangle size={18} />
+                </div>
+                <div className="flex-1 text-sm">
+                  <h3 className="font-bold text-amber-950 text-base leading-tight">
+                    Account Scheduled for Deletion
+                  </h3>
+                  <p className="mt-1.5 text-amber-900 leading-relaxed text-xs sm:text-sm">
+                    This account is scheduled for permanent deletion, but background telemetry/data cleanup is still pending.
+                    Normal account access is disabled and cannot be restored.
+                  </p>
+
+                  {recoveryStatus === 'success' ? (
+                    <div className="mt-4 p-3.5 bg-emerald-50 border border-emerald-300 text-emerald-900 rounded-xl text-xs sm:text-sm font-medium flex items-center gap-2.5">
+                      <CheckCircle2 size={18} className="text-emerald-700 flex-shrink-0" />
+                      <span>{recoveryMessage}</span>
+                    </div>
+                  ) : (
+                    <div className="mt-4 space-y-3">
+                      {recoveryStatus === 'error' && (
+                        <div className="p-3 bg-red-50 border border-red-300 text-red-800 rounded-xl text-xs font-semibold flex items-center gap-2">
+                          <span className="flex-shrink-0">⚠️</span>
+                          <span>{recoveryMessage}</span>
+                        </div>
+                      )}
+                      <p className="text-xs text-amber-800 font-medium">
+                        You can finalize the permanent removal of your account and purge remaining records now using your verified password.
+                      </p>
+                      <div className="flex items-center gap-2.5 pt-1">
+                        <button
+                          type="button"
+                          onClick={handleFinalizeDeletion}
+                          disabled={recoveryStatus === 'submitting'}
+                          className="btn btn-primary btn-sm bg-red-600 hover:bg-red-700 border-red-600 text-white font-semibold text-xs py-2 px-3.5 rounded-xl shadow-sm flex items-center gap-2"
+                        >
+                          {recoveryStatus === 'submitting' ? (
+                            <>
+                              <span className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                              Finalizing Deletion…
+                            </>
+                          ) : (
+                            'Finalize Account Deletion Now'
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPendingDeletionAccount(null);
+                            setRecoveryStatus('idle');
+                            setRecoveryMessage('');
+                          }}
+                          className="text-xs text-amber-800 hover:text-amber-950 font-semibold px-2 py-1.5"
+                        >
+                          Dismiss
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </motion.div>
+          )}
 
           {/* Error banner */}
           {errorMsg && (

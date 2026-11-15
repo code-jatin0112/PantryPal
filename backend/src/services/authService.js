@@ -273,7 +273,7 @@ export const deleteUserAccount = async ({ userId, password }) => {
   });
 
   // 2. Clean up NoSQL telemetry (MongoDB AI interaction logs)
-  if (process.env.MONGO_URI) {
+  if (process.env.MONGO_URI || process.env.MONGO_TEST_URI) {
     try {
       const { default: mongoose } = await import("mongoose");
       const { connectMongo } = await import("../config/mongo.js");
@@ -322,6 +322,14 @@ export const deleteUserAccount = async ({ userId, password }) => {
  * Survives page reload, token loss, and process restart by authenticating credentials.
  */
 export const retryAccountDeletion = async ({ email, password, userId }) => {
+  if (!password) {
+    throw new AppError(
+      "Password is required to verify identity for deletion recovery.",
+      400,
+      "INVALID_PASSWORD"
+    );
+  }
+
   let user = null;
   if (userId) {
     user = await prisma.user.findUnique({ where: { id: userId } });
@@ -329,19 +337,12 @@ export const retryAccountDeletion = async ({ email, password, userId }) => {
     user = await prisma.user.findUnique({ where: { email } });
   }
 
-  // Idempotent completion: If account does not exist, full deletion is already achieved
+  // Avoid exposing account-existence information unnecessarily through unauthenticated responses
   if (!user) {
-    return {
-      status: "COMPLETED",
-      message: "Account has already been completely deleted.",
-    };
-  }
-
-  if (!password) {
     throw new AppError(
-      "Password is required to verify identity for deletion recovery.",
-      400,
-      "INVALID_PASSWORD"
+      "Invalid credentials. Verification failed.",
+      401,
+      "INVALID_CREDENTIALS"
     );
   }
 
@@ -355,21 +356,24 @@ export const retryAccountDeletion = async ({ email, password, userId }) => {
     );
   }
 
-  // Ensure user is marked PENDING_DELETION and locked
-  if (user.deletionStatus !== "PENDING_DELETION") {
-    await prisma.user.update({
-      where: { id: user.id },
-      data: {
-        isActive: false,
-        deletionStatus: "PENDING_DELETION",
-        tokenVersion: { increment: 1 },
-      },
-    });
+  // The endpoint must ONLY finalize accounts whose deletionStatus is PENDING_DELETION or DELETION_FAILED.
+  const allowedDeletionStatuses = ["PENDING_DELETION", "DELETION_FAILED"];
+  if (!allowedDeletionStatuses.includes(user.deletionStatus)) {
+    // For a normal active account:
+    // - Do not change isActive.
+    // - Do not change tokenVersion.
+    // - Do not delete any data.
+    // - Return an appropriate non-success response.
+    throw new AppError(
+      "Account is not scheduled for deletion recovery. Normal accounts cannot be finalized via recovery.",
+      400,
+      "ACCOUNT_NOT_PENDING_DELETION"
+    );
   }
 
   // Attempt NoSQL cleanup
   let mongoSuccess = true;
-  if (process.env.MONGO_URI) {
+  if (process.env.MONGO_URI || process.env.MONGO_TEST_URI) {
     try {
       const { default: mongoose } = await import("mongoose");
       const { connectMongo } = await import("../config/mongo.js");
@@ -442,7 +446,7 @@ export const reconcilePendingAccountDeletions = async () => {
 
   for (const user of pendingUsers) {
     let mongoSuccess = true;
-    if (process.env.MONGO_URI) {
+    if (process.env.MONGO_URI || process.env.MONGO_TEST_URI) {
       try {
         const { default: mongoose } = await import("mongoose");
         const { connectMongo } = await import("../config/mongo.js");
@@ -509,7 +513,7 @@ export const exportUserData = async ({ userId }) => {
   let aiLogs = [];
   let aiLogsStatus = "not_configured";
 
-  if (process.env.MONGO_URI) {
+  if (process.env.MONGO_URI || process.env.MONGO_TEST_URI) {
     try {
       const { default: mongoose } = await import("mongoose");
       const { connectMongo } = await import("../config/mongo.js");
