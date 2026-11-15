@@ -25,8 +25,11 @@ import * as aiService from "../../src/services/aiService.js";
 import { generateRecipeFromPantry } from "../../src/services/aiRecipeService.js";
 import { chatWithKitchenAssistant } from "../../src/services/aiChatService.js";
 import {
+  computeObligationKey,
   safePersistUserMongoRecord,
   recordDeletionObligation,
+  resolvePostgresDeletionObligation,
+  resolveMongoDeletionObligation,
   resolveDeletionObligation,
 } from "../../src/utils/dataErasureCoordinator.js";
 import { errorHandler } from "../../src/middleware/errorHandler.js";
@@ -732,7 +735,7 @@ describe("Phase 6 Production Release Blockers Suite", () => {
       expect(thrownError.message).toContain("Simulated MongoDB delete failure");
 
       // 2. Durable obligation MUST be recorded in PostgreSQL AccountDeletionObligation
-      const pgObligation = await prisma.accountDeletionObligation.findUnique({
+      const pgObligation = await prisma.accountDeletionObligation.findFirst({
         where: { userId: testUserA.id },
       });
       expect(pgObligation).not.toBeNull();
@@ -785,7 +788,7 @@ describe("Phase 6 Production Release Blockers Suite", () => {
       });
 
       // Verify obligations are persisted
-      const pgObBefore = await prisma.accountDeletionObligation.findUnique({
+      const pgObBefore = await prisma.accountDeletionObligation.findFirst({
         where: { userId: orphanUserId },
       });
       expect(pgObBefore).not.toBeNull();
@@ -803,7 +806,7 @@ describe("Phase 6 Production Release Blockers Suite", () => {
       expect(remainingRecipes).toHaveLength(0);
 
       // Verify obligations are resolved across PostgreSQL and MongoDB
-      const pgObAfter = await prisma.accountDeletionObligation.findUnique({
+      const pgObAfter = await prisma.accountDeletionObligation.findFirst({
         where: { userId: orphanUserId },
       });
       expect(pgObAfter).toBeNull();
@@ -842,7 +845,7 @@ describe("Phase 6 Production Release Blockers Suite", () => {
       expect(userAfterFailedDelete.deletionStatus).toBe("DELETION_FAILED");
 
       // Verify obligation was recorded as FAILED
-      const failedObligation = await prisma.accountDeletionObligation.findUnique({
+      const failedObligation = await prisma.accountDeletionObligation.findFirst({
         where: { userId: testUserA.id },
       });
       expect(failedObligation).not.toBeNull();
@@ -880,10 +883,301 @@ describe("Phase 6 Production Release Blockers Suite", () => {
       expect(userAfterFinalRetry).toBeNull();
 
       // Verify obligation is fully resolved
-      const resolvedObligation = await prisma.accountDeletionObligation.findUnique({
+      const resolvedObligation = await prisma.accountDeletionObligation.findFirst({
         where: { userId: testUserA.id },
       });
       expect(resolvedObligation).toBeNull();
+    });
+  });
+
+  // ── 6. Obligation Safety, Isolation & Transactional Ordering ──
+  describe("6. Obligation Safety, Isolation & Transactional Ordering Suite", () => {
+    it("A. Active user + document cleanup obligation: reconciles only the target document while user and application data survive", async () => {
+      const hashed = await hashPassword("SafePass123!");
+      const activeUser = await prisma.user.create({
+        data: {
+          name: "Active Chef Safe",
+          email: `active-safe-${Date.now()}@pantrypal.test`,
+          password: hashed,
+          isActive: true,
+          deletionStatus: null,
+        },
+      });
+
+      const pantry = await prisma.pantry.create({
+        data: {
+          name: "Chef Safe Pantry",
+          userId: activeUser.id,
+          items: {
+            create: [{ name: "Olive Oil", quantity: 500, unit: "ml" }],
+          },
+        },
+      });
+
+      // Two UnstructuredRecipe documents
+      const docToClean = await UnstructuredRecipe.create({
+        userId: activeUser.id,
+        sourcePrompt: "Failed document to clean up",
+        rawOutput: { title: "Bad Recipe" },
+        conversionStatus: "NORMALIZED",
+      });
+
+      const docToKeep = await UnstructuredRecipe.create({
+        userId: activeUser.id,
+        sourcePrompt: "Valuable recipe to preserve",
+        rawOutput: { title: "Good Recipe" },
+        conversionStatus: "NORMALIZED",
+      });
+
+      const logToKeep = await AiInteractionLog.create({
+        userId: activeUser.id,
+        messagePrompt: "Helpful chat log to preserve",
+        intentDetected: "KITCHEN_ASSISTANT",
+        aiResponse: { reply: "Keep me" },
+        tokenUsage: 10,
+      });
+
+      // Record a DOCUMENT_CLEANUP obligation specifically targeting docToClean
+      await recordDeletionObligation({
+        type: "DOCUMENT_CLEANUP",
+        userId: activeUser.id,
+        targetCollection: "UnstructuredRecipe",
+        documentId: String(docToClean._id),
+        status: "FAILED",
+        error: "Compensating rollback failed previously",
+      });
+
+      // Run background reconciliation
+      const reconResult = await reconcilePendingAccountDeletions();
+      expect(reconResult.reconciled).toBeGreaterThanOrEqual(1);
+
+      // 1. Target document was deleted
+      const cleanedDoc = await UnstructuredRecipe.findById(docToClean._id);
+      expect(cleanedDoc).toBeNull();
+
+      // 2. Active user SURVIVES in PostgreSQL with isActive = true and deletionStatus = null
+      const userInPg = await prisma.user.findUnique({
+        where: { id: activeUser.id },
+      });
+      expect(userInPg).not.toBeNull();
+      expect(userInPg.isActive).toBe(true);
+      expect(userInPg.deletionStatus).toBeNull();
+
+      // 3. Pantry, other recipes, and AI logs for this active user all SURVIVE
+      const userPantry = await prisma.pantry.findUnique({
+        where: { id: pantry.id },
+        include: { items: true },
+      });
+      expect(userPantry).not.toBeNull();
+      expect(userPantry.items).toHaveLength(1);
+
+      const preservedRecipe = await UnstructuredRecipe.findById(docToKeep._id);
+      expect(preservedRecipe).not.toBeNull();
+
+      const preservedLog = await AiInteractionLog.findById(logToKeep._id);
+      expect(preservedLog).not.toBeNull();
+
+      // Cleanup
+      await prisma.user.deleteMany({ where: { id: activeUser.id } });
+      await UnstructuredRecipe.deleteMany({ userId: activeUser.id });
+      await AiInteractionLog.deleteMany({ userId: activeUser.id });
+    });
+
+    it("B. Multiple failed documents belonging to the same user: each obligation remains independently recoverable without overwriting", async () => {
+      const hashed = await hashPassword("MultiPass123!");
+      const user = await prisma.user.create({
+        data: {
+          name: "Multi Doc User",
+          email: `multidoc-${Date.now()}@pantrypal.test`,
+          password: hashed,
+          isActive: true,
+        },
+      });
+
+      const doc1 = await UnstructuredRecipe.create({
+        userId: user.id,
+        sourcePrompt: "Failed doc 1",
+        rawOutput: { title: "Recipe 1" },
+        conversionStatus: "NORMALIZED",
+      });
+
+      const doc2 = await AiInteractionLog.create({
+        userId: user.id,
+        messagePrompt: "Failed doc 2",
+        intentDetected: "KITCHEN_ASSISTANT",
+        aiResponse: { reply: "Response 2" },
+        tokenUsage: 15,
+      });
+
+      // Record obligation for doc 1
+      const ob1 = await recordDeletionObligation({
+        type: "DOCUMENT_CLEANUP",
+        userId: user.id,
+        targetCollection: "UnstructuredRecipe",
+        documentId: String(doc1._id),
+        status: "FAILED",
+        error: "Failure 1",
+      });
+
+      // Record obligation for doc 2
+      const ob2 = await recordDeletionObligation({
+        type: "DOCUMENT_CLEANUP",
+        userId: user.id,
+        targetCollection: "AiInteractionLog",
+        documentId: String(doc2._id),
+        status: "FAILED",
+        error: "Failure 2",
+      });
+
+      expect(ob1.obligationKey).not.toBe(ob2.obligationKey);
+
+      // Both obligations must exist simultaneously in PostgreSQL
+      const pgObs = await prisma.accountDeletionObligation.findMany({
+        where: { userId: user.id },
+      });
+      expect(pgObs).toHaveLength(2);
+
+      // Both obligations must exist simultaneously in MongoDB
+      const mongoObs = await DeletionObligation.find({ userId: user.id });
+      expect(mongoObs).toHaveLength(2);
+
+      // Run reconciliation
+      const reconResult = await reconcilePendingAccountDeletions();
+      expect(reconResult.reconciled).toBeGreaterThanOrEqual(2);
+
+      // Both documents are cleanly deleted
+      expect(await UnstructuredRecipe.findById(doc1._id)).toBeNull();
+      expect(await AiInteractionLog.findById(doc2._id)).toBeNull();
+
+      // Both obligations are resolved
+      const remainingPgObs = await prisma.accountDeletionObligation.findMany({
+        where: { userId: user.id },
+      });
+      expect(remainingPgObs).toHaveLength(0);
+
+      // User survives!
+      const userStillAlive = await prisma.user.findUnique({ where: { id: user.id } });
+      expect(userStillAlive).not.toBeNull();
+      expect(userStillAlive.isActive).toBe(true);
+
+      // Cleanup
+      await prisma.user.deleteMany({ where: { id: user.id } });
+    });
+
+    it("C. PostgreSQL account deletion rollback: recovery obligations survive", async () => {
+      const hashed = await hashPassword("RollbackPass123!");
+      const user = await prisma.user.create({
+        data: {
+          name: "Rollback User",
+          email: `rollback-${Date.now()}@pantrypal.test`,
+          password: hashed,
+          isActive: true,
+        },
+      });
+
+      const obligationKey = computeObligationKey({ type: "ACCOUNT_DELETION", userId: user.id });
+
+      let txRolledBack = false;
+      try {
+        await prisma.$transaction(async (tx) => {
+          // Record obligation inside tx
+          await recordDeletionObligation({
+            tx,
+            type: "ACCOUNT_DELETION",
+            userId: user.id,
+            targetCollection: "ALL",
+            status: "IN_PROGRESS",
+          });
+
+          // Transactionally resolve obligation inside tx
+          await resolvePostgresDeletionObligation({ tx, obligationKey, userId: user.id });
+
+          // Throw to simulate failure and trigger rollback
+          throw new Error("Simulated database failure during transaction");
+        });
+      } catch (err) {
+        txRolledBack = true;
+      }
+
+      expect(txRolledBack).toBe(true);
+
+      // Because the transaction rolled back, MongoDB resolution was NEVER called!
+      // The MongoDB obligation marker that was persisted survives!
+      const mongoOb = await DeletionObligation.findOne({ obligationKey });
+      expect(mongoOb).not.toBeNull();
+      expect(mongoOb.status).toBe("IN_PROGRESS");
+
+      // Cleanup
+      await prisma.user.deleteMany({ where: { id: user.id } });
+      await resolveDeletionObligation({ obligationKey, userId: user.id });
+    });
+
+    it("D. Process crash after PostgreSQL commit: MongoDB marker resolution remains safe and idempotent", async () => {
+      const orphanUserId = `crash-test-${Date.now()}`;
+      const obligationKey = computeObligationKey({ type: "ACCOUNT_DELETION", userId: orphanUserId });
+
+      // PostgreSQL user is already gone, PostgreSQL obligation marker is already gone
+      expect(await prisma.user.findUnique({ where: { id: orphanUserId } })).toBeNull();
+      expect(await prisma.accountDeletionObligation.findFirst({ where: { obligationKey } })).toBeNull();
+
+      // MongoDB still has the obligation marker and an orphaned log
+      await AiInteractionLog.create({
+        userId: orphanUserId,
+        messagePrompt: "Crash orphan log",
+        intentDetected: "KITCHEN_ASSISTANT",
+        aiResponse: { reply: "Orphan" },
+        tokenUsage: 10,
+      });
+
+      await DeletionObligation.create({
+        obligationKey,
+        type: "ACCOUNT_DELETION",
+        userId: orphanUserId,
+        targetCollection: "ALL",
+        status: "IN_PROGRESS",
+      });
+
+      // Background reconciliation runs (new process startup)
+      const result = await reconcilePendingAccountDeletions();
+      expect(result.reconciled).toBeGreaterThanOrEqual(1);
+
+      // Orphaned log is deleted
+      expect(await AiInteractionLog.find({ userId: orphanUserId })).toHaveLength(0);
+
+      // MongoDB obligation marker is safely resolved
+      expect(await DeletionObligation.findOne({ obligationKey })).toBeNull();
+    });
+
+    it("E. PostgreSQL and MongoDB obligation-write failures: never falsely claims durable recovery", async () => {
+      const fakeUserId = `fail-write-${Date.now()}`;
+
+      // Mock both PostgreSQL and MongoDB writes to throw
+      const pgSpy = vi.spyOn(prisma.accountDeletionObligation, "upsert").mockRejectedValue(new Error("PG network timeout"));
+
+      let mongoSpy;
+      try {
+        const { DeletionObligation } = await import("../../src/models/DeletionObligation.js");
+        mongoSpy = vi.spyOn(DeletionObligation, "findOneAndUpdate").mockRejectedValue(new Error("Mongo connection closed"));
+      } catch (e) {}
+
+      let thrownError = null;
+      try {
+        await recordDeletionObligation({
+          type: "ACCOUNT_DELETION",
+          userId: fakeUserId,
+          targetCollection: "ALL",
+          status: "FAILED",
+          error: "Simulated error",
+        });
+      } catch (err) {
+        thrownError = err;
+      }
+
+      expect(thrownError).not.toBeNull();
+      expect(thrownError.message).toContain("CRITICAL: Failed to durably persist deletion obligation to any datastore");
+
+      pgSpy.mockRestore();
+      if (mongoSpy) mongoSpy.mockRestore();
     });
   });
 });
