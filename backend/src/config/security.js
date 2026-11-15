@@ -193,4 +193,6 @@ export const getAiLimiter = (options = {}) => {
   });
 };
 
+export const sharedAiLimiter = getAiLimiter();
+
 
