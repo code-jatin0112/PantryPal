@@ -79,7 +79,7 @@ jobs:
 
       - name: Run Backend Integration & Unit Test Suite
         working-directory: backend
-        run: npm test -- --fileParallelism=false
+        run: npm test
 
       - name: Production Dependency Installation Smoke Test
         working-directory: backend
