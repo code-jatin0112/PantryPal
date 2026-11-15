@@ -6,6 +6,7 @@ import prisma from "../../src/config/database.js";
 import { connectMongo, disconnectMongo } from "../../src/config/mongo.js";
 import { AiInteractionLog } from "../../src/models/AiInteractionLog.js";
 import { UnstructuredRecipe } from "../../src/models/UnstructuredRecipe.js";
+import { DeletionObligation } from "../../src/models/DeletionObligation.js";
 import { generateAccessToken } from "../../src/utils/token.js";
 import { hashPassword } from "../../src/utils/password.js";
 import {
@@ -22,6 +23,12 @@ import { getAuthLimiter, getAiLimiter, sharedAiLimiter } from "../../src/config/
 import { generateAIResponse } from "../../src/services/aiService.js";
 import * as aiService from "../../src/services/aiService.js";
 import { generateRecipeFromPantry } from "../../src/services/aiRecipeService.js";
+import { chatWithKitchenAssistant } from "../../src/services/aiChatService.js";
+import {
+  safePersistUserMongoRecord,
+  recordDeletionObligation,
+  resolveDeletionObligation,
+} from "../../src/utils/dataErasureCoordinator.js";
 import { errorHandler } from "../../src/middleware/errorHandler.js";
 
 describe("Phase 6 Production Release Blockers Suite", () => {
@@ -519,6 +526,364 @@ describe("Phase 6 Production Release Blockers Suite", () => {
       expect(loggedOutput).toContain("******");
 
       consoleSpy.mockRestore();
+    });
+  });
+
+  // ── 5. Durable Data Erasure & In-Flight Fencing Verification ──
+  describe("5. Durable Data Erasure & In-Flight Fencing Verification", () => {
+    let testUserA, testUserB;
+    const passwordA = "ErasurePass123!";
+    const passwordB = "ErasurePass456!";
+
+    beforeEach(async () => {
+      const hashedA = await hashPassword(passwordA);
+      const hashedB = await hashPassword(passwordB);
+
+      testUserA = await prisma.user.create({
+        data: {
+          name: "User A Fencing",
+          email: `usera-fence-${Date.now()}@pantrypal.test`,
+          password: hashedA,
+          isActive: true,
+        },
+      });
+
+      testUserB = await prisma.user.create({
+        data: {
+          name: "User B Isolation",
+          email: `userb-fence-${Date.now()}@pantrypal.test`,
+          password: hashedB,
+          isActive: true,
+        },
+      });
+
+      // Seed baseline records for User B
+      await AiInteractionLog.create({
+        userId: testUserB.id,
+        messagePrompt: "User B Baseline Prompt",
+        intentDetected: "KITCHEN_ASSISTANT",
+        aiResponse: { reply: "User B response" },
+        tokenUsage: 50,
+      });
+
+      await UnstructuredRecipe.create({
+        userId: testUserB.id,
+        sourcePrompt: "User B Baseline Recipe",
+        rawOutput: { title: "User B Recipe" },
+        conversionStatus: "NORMALIZED",
+      });
+    });
+
+    afterEach(async () => {
+      vi.restoreAllMocks();
+      if (testUserA?.id) {
+        await prisma.user.deleteMany({ where: { id: testUserA.id } });
+        await prisma.accountDeletionObligation.deleteMany({ where: { userId: testUserA.id } });
+        await AiInteractionLog.deleteMany({ userId: testUserA.id });
+        await UnstructuredRecipe.deleteMany({ userId: testUserA.id });
+        await DeletionObligation.deleteMany({ userId: testUserA.id });
+      }
+      if (testUserB?.id) {
+        await prisma.user.deleteMany({ where: { id: testUserB.id } });
+        await prisma.accountDeletionObligation.deleteMany({ where: { userId: testUserB.id } });
+        await AiInteractionLog.deleteMany({ userId: testUserB.id });
+        await UnstructuredRecipe.deleteMany({ userId: testUserB.id });
+        await DeletionObligation.deleteMany({ userId: testUserB.id });
+      }
+    });
+
+    it("pause AI generation, delete user, resume AI: produces zero orphaned records in MongoDB", async () => {
+      let resumeAiGeneration;
+      const aiGenerationPaused = new Promise((resolve) => {
+        resumeAiGeneration = resolve;
+      });
+
+      const aiSpy = vi
+        .spyOn(aiService, "generateStructuredAIResponse")
+        .mockImplementation(async () => {
+          // Pause execution until user account deletion completes
+          await aiGenerationPaused;
+          return {
+            reply: "Your recipe guidance",
+            intent: "KITCHEN_ASSISTANT",
+            relevantItems: [],
+            suggestedActions: [],
+            warnings: [],
+          };
+        });
+
+      // 1. Initiate in-flight AI generation request for User A
+      const inFlightChatPromise = chatWithKitchenAssistant({
+        userId: testUserA.id,
+        message: "What can I cook with tomatoes?",
+      });
+
+      // Give event loop time to enter AI service
+      await new Promise((r) => setTimeout(r, 50));
+
+      // 2. Finalize account deletion for User A while AI generation is in-flight
+      const deletionResult = await deleteUserAccount({
+        userId: testUserA.id,
+        password: passwordA,
+      });
+      expect(deletionResult.message).toContain("deleted successfully");
+
+      // Verify User A row is permanently deleted from PostgreSQL
+      const pgUserAfterDelete = await prisma.user.findUnique({
+        where: { id: testUserA.id },
+      });
+      expect(pgUserAfterDelete).toBeNull();
+
+      // 3. Resume the in-flight AI request
+      resumeAiGeneration();
+      await inFlightChatPromise;
+
+      // 4. Verify ZERO orphaned MongoDB records exist for User A
+      const userALogs = await AiInteractionLog.find({ userId: testUserA.id });
+      expect(userALogs).toHaveLength(0);
+
+      const userARecipes = await UnstructuredRecipe.find({ userId: testUserA.id });
+      expect(userARecipes).toHaveLength(0);
+
+      // 5. Verify tenant isolation: User B's records remain completely intact
+      const userBLogs = await AiInteractionLog.find({ userId: testUserB.id });
+      expect(userBLogs).toHaveLength(1);
+
+      const userBRecipes = await UnstructuredRecipe.find({ userId: testUserB.id });
+      expect(userBRecipes).toHaveLength(1);
+
+      aiSpy.mockRestore();
+    });
+
+    it("simulates post-write verification failure and executes compensating rollback", async () => {
+      let createdDocId = null;
+
+      // Execute safe persist where user is deactivated right after document creation
+      const result = await safePersistUserMongoRecord({
+        userId: testUserA.id,
+        targetCollection: "AiInteractionLog",
+        createRecordFn: async () => {
+          const doc = await AiInteractionLog.create({
+            userId: testUserA.id,
+            messagePrompt: "Prompt right before deactivation",
+            intentDetected: "KITCHEN_ASSISTANT",
+            aiResponse: { reply: "Test reply" },
+            tokenUsage: 30,
+          });
+          createdDocId = doc._id;
+
+          // Simulate user concurrently deactivated or queued for deletion
+          await prisma.user.update({
+            where: { id: testUserA.id },
+            data: { isActive: false, deletionStatus: "PENDING_DELETION" },
+          });
+
+          return doc;
+        },
+      });
+
+      // Verification failed -> function must return null
+      expect(result).toBeNull();
+
+      // Compensating rollback must have deleted the document
+      expect(createdDocId).not.toBeNull();
+      const docInDb = await AiInteractionLog.findById(createdDocId);
+      expect(docInDb).toBeNull();
+    });
+
+    it("simulates compensating deletion failure: does not swallow error and records durable obligation", async () => {
+      let createdDocId = null;
+
+      // Mock deleteOne to simulate MongoDB failure during rollback
+      const deleteSpy = vi
+        .spyOn(AiInteractionLog, "deleteOne")
+        .mockRejectedValueOnce(new Error("Simulated MongoDB delete failure"));
+
+      let thrownError = null;
+      try {
+        await safePersistUserMongoRecord({
+          userId: testUserA.id,
+          targetCollection: "AiInteractionLog",
+          createRecordFn: async () => {
+            const doc = await AiInteractionLog.create({
+              userId: testUserA.id,
+              messagePrompt: "Prompt with rollback failure",
+              intentDetected: "KITCHEN_ASSISTANT",
+              aiResponse: { reply: "Test" },
+              tokenUsage: 25,
+            });
+            createdDocId = doc._id;
+
+            // Deactivate user to trigger compensating rollback
+            await prisma.user.update({
+              where: { id: testUserA.id },
+              data: { isActive: false, deletionStatus: "PENDING_DELETION" },
+            });
+
+            return doc;
+          },
+        });
+      } catch (err) {
+        thrownError = err;
+      }
+
+      // 1. Error MUST NOT be swallowed
+      expect(thrownError).not.toBeNull();
+      expect(thrownError.message).toContain("Simulated MongoDB delete failure");
+
+      // 2. Durable obligation MUST be recorded in PostgreSQL AccountDeletionObligation
+      const pgObligation = await prisma.accountDeletionObligation.findUnique({
+        where: { userId: testUserA.id },
+      });
+      expect(pgObligation).not.toBeNull();
+      expect(pgObligation.status).toBe("FAILED");
+      expect(pgObligation.documentId).toBe(String(createdDocId));
+      expect(pgObligation.targetCollection).toBe("AiInteractionLog");
+      expect(pgObligation.lastError).toContain("Simulated MongoDB delete failure");
+
+      // 3. Durable obligation MUST also exist in MongoDB
+      const mongoObligation = await DeletionObligation.findOne({
+        userId: testUserA.id,
+      });
+      expect(mongoObligation).not.toBeNull();
+      expect(mongoObligation.status).toBe("FAILED");
+
+      deleteSpy.mockRestore();
+    });
+
+    it("simulates worker restart and cleanup recovery without depending on PostgreSQL User row", async () => {
+      const orphanUserId = `orphan-${Date.now()}`;
+
+      // Ensure NO PostgreSQL User row exists for this orphan user
+      const existingUser = await prisma.user.findUnique({
+        where: { id: orphanUserId },
+      });
+      expect(existingUser).toBeNull();
+
+      // Seed orphaned records directly into MongoDB
+      await AiInteractionLog.create({
+        userId: orphanUserId,
+        messagePrompt: "Orphaned AI prompt after process restart",
+        intentDetected: "KITCHEN_ASSISTANT",
+        aiResponse: { reply: "Orphaned" },
+        tokenUsage: 40,
+      });
+
+      await UnstructuredRecipe.create({
+        userId: orphanUserId,
+        sourcePrompt: "Orphaned Recipe Prompt",
+        rawOutput: { title: "Orphaned Soup" },
+        conversionStatus: "NORMALIZED",
+      });
+
+      // Durably record deletion obligations in PostgreSQL and MongoDB
+      await recordDeletionObligation({
+        userId: orphanUserId,
+        targetCollection: "ALL",
+        status: "FAILED",
+        error: "Previous worker crashed before cleanup",
+      });
+
+      // Verify obligations are persisted
+      const pgObBefore = await prisma.accountDeletionObligation.findUnique({
+        where: { userId: orphanUserId },
+      });
+      expect(pgObBefore).not.toBeNull();
+      expect(pgObBefore.status).toBe("FAILED");
+
+      // Run background reconciliation (simulates new worker startup / cron)
+      const reconResult = await reconcilePendingAccountDeletions();
+      expect(reconResult.reconciled).toBeGreaterThanOrEqual(1);
+
+      // Verify all orphaned records are cleanly purged from MongoDB
+      const remainingLogs = await AiInteractionLog.find({ userId: orphanUserId });
+      expect(remainingLogs).toHaveLength(0);
+
+      const remainingRecipes = await UnstructuredRecipe.find({ userId: orphanUserId });
+      expect(remainingRecipes).toHaveLength(0);
+
+      // Verify obligations are resolved across PostgreSQL and MongoDB
+      const pgObAfter = await prisma.accountDeletionObligation.findUnique({
+        where: { userId: orphanUserId },
+      });
+      expect(pgObAfter).toBeNull();
+
+      const mongoObAfter = await DeletionObligation.findOne({ userId: orphanUserId });
+      expect(mongoObAfter).toBeNull();
+    });
+
+    it("handles MongoDB cleanup failure during deleteUserAccount and retryAccountDeletion with 502 and prevents false success", async () => {
+      // Simulate MongoDB failure during cleanup
+      const mongoDeleteSpy = vi
+        .spyOn(UnstructuredRecipe, "deleteMany")
+        .mockRejectedValue(new Error("Simulated MongoDB cluster failure"));
+
+      // 1. Initial delete attempt fails on MongoDB
+      let deleteErr = null;
+      try {
+        await deleteUserAccount({
+          userId: testUserA.id,
+          password: passwordA,
+        });
+      } catch (err) {
+        deleteErr = err;
+      }
+
+      expect(deleteErr).not.toBeNull();
+      expect(deleteErr.statusCode).toBe(502);
+      expect(deleteErr.code).toBe("TELEMETRY_CLEANUP_FAILED");
+
+      // Verify user remains in PostgreSQL with DELETION_FAILED
+      const userAfterFailedDelete = await prisma.user.findUnique({
+        where: { id: testUserA.id },
+      });
+      expect(userAfterFailedDelete).not.toBeNull();
+      expect(userAfterFailedDelete.isActive).toBe(false);
+      expect(userAfterFailedDelete.deletionStatus).toBe("DELETION_FAILED");
+
+      // Verify obligation was recorded as FAILED
+      const failedObligation = await prisma.accountDeletionObligation.findUnique({
+        where: { userId: testUserA.id },
+      });
+      expect(failedObligation).not.toBeNull();
+      expect(failedObligation.status).toBe("FAILED");
+
+      // 2. Retry deletion while MongoDB is still failing -> must fail with 502, NO false success
+      let retryErr = null;
+      try {
+        await retryAccountDeletion({
+          email: testUserA.email,
+          password: passwordA,
+        });
+      } catch (err) {
+        retryErr = err;
+      }
+
+      expect(retryErr).not.toBeNull();
+      expect(retryErr.statusCode).toBe(502);
+      expect(retryErr.code).toBe("TELEMETRY_CLEANUP_FAILED");
+
+      // 3. Restore MongoDB and execute retry -> must succeed
+      mongoDeleteSpy.mockRestore();
+
+      const retrySuccess = await retryAccountDeletion({
+        email: testUserA.email,
+        password: passwordA,
+      });
+
+      expect(retrySuccess.status).toBe("COMPLETED");
+
+      // Verify user is permanently deleted from PostgreSQL
+      const userAfterFinalRetry = await prisma.user.findUnique({
+        where: { id: testUserA.id },
+      });
+      expect(userAfterFinalRetry).toBeNull();
+
+      // Verify obligation is fully resolved
+      const resolvedObligation = await prisma.accountDeletionObligation.findUnique({
+        where: { userId: testUserA.id },
+      });
+      expect(resolvedObligation).toBeNull();
     });
   });
 });
