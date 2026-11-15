@@ -12,6 +12,17 @@ export const updatePreferencesValidation = [
     .trim()
     .withMessage("Each dietary preference must be a string"),
 
+  body("dietaryRequirements")
+    .optional({ nullable: false })
+    .isArray()
+    .withMessage("dietaryRequirements must be an array of strings"),
+
+  body("dietaryRequirements.*")
+    .optional()
+    .isString()
+    .trim()
+    .withMessage("Each dietary requirement must be a string"),
+
   body("allergies")
     .optional({ nullable: false })
     .isArray()
