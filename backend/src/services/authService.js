@@ -3,6 +3,10 @@ import { hashPassword, comparePassword } from "../utils/password.js";
 import { generateAccessToken } from "../utils/token.js";
 import AppError from "../utils/AppError.js";
 import { sanitizeDatabaseUrl } from "../utils/testDatabaseGuard.js";
+import {
+  recordDeletionObligation,
+  resolveDeletionObligation,
+} from "../utils/dataErasureCoordinator.js";
 
 export const cleanUserMongoData = async (targetUserId) => {
   const { default: mongoose } = await import("mongoose");
@@ -293,48 +297,81 @@ export const deleteUserAccount = async ({ userId, password }) => {
     );
   }
 
-  // 1. Immediately transition to durable PENDING_DELETION state
-  // This locks out the account and revokes active sessions across all routes
-  await prisma.user.update({
-    where: { id: userId },
-    data: {
-      isActive: false,
-      deletionStatus: "PENDING_DELETION",
-      tokenVersion: { increment: 1 },
-    },
-  });
+  let deletionSuccess = false;
+  let cleanupError = null;
 
-  // 2. Clean up NoSQL telemetry and AI recipes (MongoDB)
-  if (process.env.MONGO_URI || process.env.MONGO_TEST_URI) {
-    try {
-      await cleanUserMongoData(userId);
-    } catch (mongoErr) {
-      console.error(
-        "Failed to delete MongoDB data during account deletion:",
-        sanitizeDatabaseUrl(mongoErr.message)
-      );
-      await prisma.user.update({
+  await prisma.$transaction(
+    async (tx) => {
+      // 1. Acquire transaction-level advisory lock on userId across all processes
+      await tx.$executeRaw`
+        SELECT pg_advisory_xact_lock(hashtext(${ "pantrypal_user_lock" }), hashtext(${userId}))
+      `;
+
+      // 2. Immediately transition to durable PENDING_DELETION state
+      // This locks out the account and revokes active sessions across all routes
+      await tx.user.update({
         where: { id: userId },
-        data: { deletionStatus: "DELETION_FAILED" },
-      }).catch(() => {});
-      throw new AppError(
-        "Account entered pending deletion, but NoSQL telemetry cleanup failed. Please retry to complete deletion.",
-        502,
-        "TELEMETRY_CLEANUP_FAILED"
-      );
-    }
-  }
+        data: {
+          isActive: false,
+          deletionStatus: "PENDING_DELETION",
+          tokenVersion: { increment: 1 },
+        },
+      });
 
-  // 3. PostgreSQL transactional cascade deletion
-  await prisma.$transaction(async (tx) => {
-    await tx.user.delete({
-      where: { id: userId },
-    });
-  });
+      // 3. Durably record deletion obligation before deleting user row
+      await recordDeletionObligation({
+        userId,
+        targetCollection: "ALL",
+        status: "IN_PROGRESS",
+      });
 
-  // Final purge sweep to eliminate any lingering in-flight NoSQL telemetry
-  if (process.env.MONGO_URI || process.env.MONGO_TEST_URI) {
-    cleanUserMongoData(userId).catch(() => {});
+      // 4. Clean up NoSQL telemetry and AI recipes (MongoDB)
+      let mongoSuccess = true;
+      if (process.env.MONGO_URI || process.env.MONGO_TEST_URI) {
+        try {
+          await cleanUserMongoData(userId);
+        } catch (mongoErr) {
+          console.error(
+            "Failed to delete MongoDB data during account deletion:",
+            sanitizeDatabaseUrl(mongoErr.message)
+          );
+          mongoSuccess = false;
+          cleanupError = mongoErr;
+        }
+      }
+
+      if (!mongoSuccess) {
+        await tx.user.update({
+          where: { id: userId },
+          data: { deletionStatus: "DELETION_FAILED" },
+        });
+        await recordDeletionObligation({
+          userId,
+          targetCollection: "ALL",
+          status: "FAILED",
+          error: cleanupError?.message || "MongoDB cleanup failed",
+        });
+        return;
+      }
+
+      // 5. PostgreSQL transactional cascade deletion
+      await tx.user.delete({
+        where: { id: userId },
+      });
+
+      // 6. Resolve completed deletion obligation
+      await resolveDeletionObligation(userId);
+      deletionSuccess = true;
+    },
+    { timeout: 30000 }
+  );
+
+  if (!deletionSuccess) {
+    throw new AppError(
+      "Account entered pending deletion, but NoSQL telemetry cleanup failed. Please retry to complete deletion.",
+      502,
+      "TELEMETRY_CLEANUP_FAILED"
+    );
   }
 
   return {
@@ -396,40 +433,76 @@ export const retryAccountDeletion = async ({ email, password, userId }) => {
     );
   }
 
-  // Attempt NoSQL cleanup
-  let mongoSuccess = true;
-  if (process.env.MONGO_URI || process.env.MONGO_TEST_URI) {
-    try {
-      await cleanUserMongoData(user.id);
-    } catch (err) {
-      console.warn("MongoDB retry cleanup failed:", sanitizeDatabaseUrl(err.message));
-      mongoSuccess = false;
-    }
-  }
+  let retrySuccess = false;
+  let cleanupError = null;
 
-  if (!mongoSuccess) {
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { deletionStatus: "DELETION_FAILED" },
-    }).catch(() => {});
+  await prisma.$transaction(
+    async (tx) => {
+      // 1. Acquire transaction-level advisory lock
+      await tx.$executeRaw`
+        SELECT pg_advisory_xact_lock(hashtext(${ "pantrypal_user_lock" }), hashtext(${user.id}))
+      `;
 
+      // 2. Re-verify inside lock
+      const [freshUser] = await tx.$queryRaw`
+        SELECT id, "deletionStatus" FROM "User" WHERE id = ${user.id}
+      `;
+      if (!freshUser || !allowedDeletionStatuses.includes(freshUser.deletionStatus)) {
+        retrySuccess = true;
+        return;
+      }
+
+      // 3. Mark obligation IN_PROGRESS
+      await recordDeletionObligation({
+        userId: user.id,
+        targetCollection: "ALL",
+        status: "IN_PROGRESS",
+      });
+
+      // 4. Attempt NoSQL cleanup
+      let mongoSuccess = true;
+      if (process.env.MONGO_URI || process.env.MONGO_TEST_URI) {
+        try {
+          await cleanUserMongoData(user.id);
+        } catch (err) {
+          console.warn("MongoDB retry cleanup failed:", sanitizeDatabaseUrl(err.message));
+          mongoSuccess = false;
+          cleanupError = err;
+        }
+      }
+
+      if (!mongoSuccess) {
+        await tx.user.update({
+          where: { id: user.id },
+          data: { deletionStatus: "DELETION_FAILED" },
+        });
+        await recordDeletionObligation({
+          userId: user.id,
+          targetCollection: "ALL",
+          status: "FAILED",
+          error: cleanupError?.message || "MongoDB cleanup failed during retry",
+        });
+        return;
+      }
+
+      // 5. PostgreSQL transactional cascade deletion
+      await tx.user.delete({
+        where: { id: user.id },
+      });
+
+      // 6. Resolve obligation
+      await resolveDeletionObligation(user.id);
+      retrySuccess = true;
+    },
+    { timeout: 30000 }
+  );
+
+  if (!retrySuccess) {
     throw new AppError(
       "Telemetry cleanup failed during retry. Account remains locked in deletion state. Please retry or wait for background recovery.",
       502,
       "TELEMETRY_CLEANUP_FAILED"
     );
-  }
-
-  // PostgreSQL transactional cascade deletion
-  await prisma.$transaction(async (tx) => {
-    await tx.user.delete({
-      where: { id: user.id },
-    });
-  });
-
-  // Final purge sweep to eliminate any lingering in-flight NoSQL telemetry
-  if (process.env.MONGO_URI || process.env.MONGO_TEST_URI) {
-    cleanUserMongoData(user.id).catch(() => {});
   }
 
   return {
@@ -453,6 +526,7 @@ export const reconcilePendingAccountDeletions = async () => {
 
   isReconciliationRunning = true;
   try {
+    // 1. Query pending accounts from PostgreSQL User
     let pendingUsers = [];
     try {
       pendingUsers = await prisma.user.findMany({
@@ -473,65 +547,133 @@ export const reconcilePendingAccountDeletions = async () => {
       return { reconciled: 0, failed: 0, error: sanitizeDatabaseUrl(queryErr.message) };
     }
 
-    if (!pendingUsers || pendingUsers.length === 0) {
+    // 2. Query durable deletion obligations from PostgreSQL
+    let pgObligations = [];
+    try {
+      pgObligations = await prisma.accountDeletionObligation.findMany({
+        where: {
+          status: { in: ["PENDING", "FAILED", "IN_PROGRESS"] },
+        },
+        select: { userId: true },
+      });
+    } catch (pgObErr) {
+      console.warn(
+        "[Reconciliation] Failed to query PostgreSQL obligations:",
+        sanitizeDatabaseUrl(pgObErr.message)
+      );
+    }
+
+    // 3. Query durable deletion obligations from MongoDB (if available)
+    let mongoObligations = [];
+    if (process.env.MONGO_URI || process.env.MONGO_TEST_URI) {
+      try {
+        const { default: mongoose } = await import("mongoose");
+        const { connectMongo } = await import("../config/mongo.js");
+        if (mongoose.connection.readyState === 0) {
+          await connectMongo();
+        }
+        if (mongoose.connection.readyState === 1) {
+          const { DeletionObligation } = await import("../models/DeletionObligation.js");
+          if (DeletionObligation) {
+            mongoObligations = await DeletionObligation.find({
+              status: { $in: ["PENDING", "FAILED", "IN_PROGRESS"] },
+            }).select("userId").lean();
+          }
+        }
+      } catch (mongoObErr) {
+        console.warn(
+          "[Reconciliation] Failed to query MongoDB obligations:",
+          sanitizeDatabaseUrl(mongoObErr.message)
+        );
+      }
+    }
+
+    // Deduplicate user IDs across all sources
+    const targetUserIds = [
+      ...new Set([
+        ...pendingUsers.map((u) => u.id),
+        ...pgObligations.map((o) => o.userId),
+        ...mongoObligations.map((o) => o.userId),
+      ]),
+    ];
+
+    if (!targetUserIds || targetUserIds.length === 0) {
       return { reconciled: 0, failed: 0 };
     }
 
-    console.log(`[Reconciliation] Found ${pendingUsers.length} account(s) pending deletion finalization.`);
+    console.log(`[Reconciliation] Found ${targetUserIds.length} target(s) for deletion reconciliation.`);
 
     let reconciled = 0;
     let failed = 0;
 
-    for (const user of pendingUsers) {
-      // Re-verify that user has not been concurrently modified or finalized by another process
+    for (const targetUserId of targetUserIds) {
       try {
-        const freshUser = await prisma.user.findUnique({
-          where: { id: user.id },
-          select: { id: true, deletionStatus: true },
-        });
+        await prisma.$transaction(
+          async (tx) => {
+            // Acquire transaction-level advisory lock
+            await tx.$executeRaw`
+              SELECT pg_advisory_xact_lock(hashtext(${ "pantrypal_user_lock" }), hashtext(${targetUserId}))
+            `;
 
-        if (!freshUser || !["PENDING_DELETION", "DELETION_FAILED"].includes(freshUser.deletionStatus)) {
-          console.log(`[Reconciliation] User ${user.id} was already finalized or status changed concurrently. Skipping.`);
-          continue;
-        }
-      } catch (checkErr) {
-        console.warn(`[Reconciliation] Failed to check status for user ${user.id}:`, sanitizeDatabaseUrl(checkErr.message));
-        failed++;
-        continue;
-      }
+            // Check if user still exists in PostgreSQL
+            const [freshUser] = await tx.$queryRaw`
+              SELECT id, "deletionStatus" FROM "User" WHERE id = ${targetUserId}
+            `;
 
-      let mongoSuccess = true;
-      if (process.env.MONGO_URI || process.env.MONGO_TEST_URI) {
-        try {
-          await cleanUserMongoData(user.id);
-        } catch (err) {
-          console.warn(`[Reconciliation] MongoDB cleanup failed for user ${user.id}:`, sanitizeDatabaseUrl(err.message));
-          mongoSuccess = false;
-        }
-      }
+            // Clean up MongoDB data
+            let mongoSuccess = true;
+            let cleanupErr = null;
+            if (process.env.MONGO_URI || process.env.MONGO_TEST_URI) {
+              try {
+                await cleanUserMongoData(targetUserId);
+              } catch (err) {
+                console.warn(
+                  `[Reconciliation] MongoDB cleanup failed for user ${targetUserId}:`,
+                  sanitizeDatabaseUrl(err.message)
+                );
+                mongoSuccess = false;
+                cleanupErr = err;
+              }
+            }
 
-      if (mongoSuccess) {
-        try {
-          await prisma.user.delete({ where: { id: user.id } });
-          console.log(`[Reconciliation] Successfully finalized deletion for user ${user.id}`);
-          reconciled++;
-        } catch (err) {
-          if (err.code === "P2025") {
-            // Record was already deleted by another process or user retry
-            console.log(`[Reconciliation] User ${user.id} was already deleted by another process.`);
-            reconciled++;
-          } else {
-            console.error(`[Reconciliation] PostgreSQL deletion failed for user ${user.id}:`, sanitizeDatabaseUrl(err.message));
-            failed++;
-          }
-        }
-      } else {
-        await prisma.user.update({
-          where: { id: user.id },
-          data: { deletionStatus: "DELETION_FAILED" },
-        }).catch((updateErr) => {
-          console.warn(`[Reconciliation] Failed to update user ${user.id} status:`, sanitizeDatabaseUrl(updateErr.message));
-        });
+            if (mongoSuccess) {
+              // Delete PostgreSQL User if still present
+              if (freshUser) {
+                try {
+                  await tx.user.delete({ where: { id: targetUserId } });
+                } catch (delErr) {
+                  if (delErr.code !== "P2025") {
+                    throw delErr;
+                  }
+                }
+              }
+              // Resolve durable obligations across PostgreSQL and MongoDB
+              await resolveDeletionObligation(targetUserId);
+              console.log(`[Reconciliation] Successfully finalized deletion for user ${targetUserId}`);
+              reconciled++;
+            } else {
+              if (freshUser) {
+                await tx.user.update({
+                  where: { id: targetUserId },
+                  data: { deletionStatus: "DELETION_FAILED" },
+                });
+              }
+              await recordDeletionObligation({
+                userId: targetUserId,
+                targetCollection: "ALL",
+                status: "FAILED",
+                error: cleanupErr?.message || "Reconciliation MongoDB cleanup failed",
+              });
+              failed++;
+            }
+          },
+          { timeout: 30000 }
+        );
+      } catch (userErr) {
+        console.error(
+          `[Reconciliation] Error reconciling user ${targetUserId}:`,
+          sanitizeDatabaseUrl(userErr.message)
+        );
         failed++;
       }
     }

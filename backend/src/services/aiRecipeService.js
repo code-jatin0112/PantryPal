@@ -14,6 +14,7 @@ import {
   buildRecipeGenerationPrompt,
 } from "../utils/aiContextBuilder.js";
 import { UnstructuredRecipe } from "../models/UnstructuredRecipe.js";
+import { safePersistUserMongoRecord } from "../utils/dataErasureCoordinator.js";
 
 export const generateRecipeFromPantry = async ({
   userId,
@@ -98,51 +99,18 @@ Important rules:
     );
   }
 
-  // Persist unstructured recipe generation into MongoDB (NoSQL) with database-backed fencing
-  try {
-    const activeUser = await prisma.user.findFirst({
-      where: {
-        id: userId,
-        isActive: true,
-        deletionStatus: null,
-      },
-      select: { id: true },
-    });
-
-    if (!activeUser) {
-      console.warn(
-        `[aiRecipeService] Skipping UnstructuredRecipe persist: user ${userId} is inactive, pending deletion, or deleted.`
-      );
-    } else {
-      const createdDoc = await UnstructuredRecipe.create({
+  // Persist unstructured recipe generation into MongoDB (NoSQL) with durable database-backed coordination
+  await safePersistUserMongoRecord({
+    userId,
+    targetCollection: "UnstructuredRecipe",
+    createRecordFn: () =>
+      UnstructuredRecipe.create({
         userId,
         sourcePrompt: preferences || "Pantry Recipe Generation",
         rawOutput: recipe,
         conversionStatus: "NORMALIZED",
-      });
-
-      // Post-write verification fence to eliminate TOCTOU race:
-      // If the account was deactivated or queued for deletion concurrently during persistence,
-      // roll back and purge the newly created document.
-      const stillActiveUser = await prisma.user.findFirst({
-        where: {
-          id: userId,
-          isActive: true,
-          deletionStatus: null,
-        },
-        select: { id: true },
-      });
-
-      if (!stillActiveUser) {
-        console.warn(
-          `[aiRecipeService] Compensating rollback: purging UnstructuredRecipe ${createdDoc._id} because user ${userId} entered deletion concurrently.`
-        );
-        await UnstructuredRecipe.deleteOne({ _id: createdDoc._id }).catch(() => {});
-      }
-    }
-  } catch (mongoErr) {
-    console.warn("MongoDB unstructured recipe save skipped:", mongoErr.message);
-  }
+      }),
+  });
 
   return {
     pantry: {

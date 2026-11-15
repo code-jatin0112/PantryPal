@@ -2,6 +2,7 @@ import prisma from "../config/database.js";
 import { generateStructuredAIResponse } from "./aiService.js";
 import { aiChatResponseSchema } from "../schemas/aiChatSchema.js";
 import { AiInteractionLog } from "../models/AiInteractionLog.js";
+import { safePersistUserMongoRecord } from "../utils/dataErasureCoordinator.js";
 import {
   buildAIChatContext,
   buildAIChatPrompt,
@@ -88,50 +89,19 @@ Core Principles:
     responseSchema: aiChatResponseSchema,
   });
 
-  // Persist interaction telemetry into MongoDB (NoSQL) with database-backed fencing
-  try {
-    const activeUser = await prisma.user.findFirst({
-      where: {
-        id: userId,
-        isActive: true,
-        deletionStatus: null,
-      },
-      select: { id: true },
-    });
-
-    if (!activeUser) {
-      console.warn(
-        `[aiChatService] Skipping AiInteractionLog persist: user ${userId} is inactive, pending deletion, or deleted.`
-      );
-    } else {
-      const createdDoc = await AiInteractionLog.create({
+  // Persist interaction telemetry into MongoDB (NoSQL) with durable database-backed coordination
+  await safePersistUserMongoRecord({
+    userId,
+    targetCollection: "AiInteractionLog",
+    createRecordFn: () =>
+      AiInteractionLog.create({
         userId,
         messagePrompt: message,
         intentDetected: response.intent || "KITCHEN_ASSISTANT",
         aiResponse: response,
         tokenUsage: message.length + JSON.stringify(response).length,
-      });
-
-      // Post-write verification fence to eliminate TOCTOU race
-      const stillActiveUser = await prisma.user.findFirst({
-        where: {
-          id: userId,
-          isActive: true,
-          deletionStatus: null,
-        },
-        select: { id: true },
-      });
-
-      if (!stillActiveUser) {
-        console.warn(
-          `[aiChatService] Compensating rollback: purging AiInteractionLog ${createdDoc._id} because user ${userId} entered deletion concurrently.`
-        );
-        await AiInteractionLog.deleteOne({ _id: createdDoc._id }).catch(() => {});
-      }
-    }
-  } catch (mongoErr) {
-    console.warn("MongoDB log save skipped:", mongoErr.message);
-  }
+      }),
+  });
 
   return {
     reply: response.reply,
