@@ -23,12 +23,12 @@ import { getRecipes, getFavoriteRecipes } from '../../services/recipeService';
 import { getMealPlans } from '../../services/mealPlanService';
 import { getShoppingList } from '../../services/shoppingListService';
 import { getPantries, getPantryItems } from '../../services/pantryService';
-import { getCurrentUserProfile } from '../../services/preferenceService';
+import { getUserProfile, updateUserProfile } from '../../services/authService';
 
 const STORAGE_PROFILE_KEY = 'pantrypal_user_profile';
 
 const Profile = () => {
-  const { user, logout } = useAuth();
+  const { user, logout, updateUser } = useAuth();
   const navigate = useNavigate();
   const toast = useToast();
 
@@ -55,6 +55,25 @@ const Profile = () => {
 
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isPasswordOpen, setIsPasswordOpen] = useState(false);
+
+  // Load live profile & statistics from backend
+  useEffect(() => {
+    const fetchProfileAndStats = async () => {
+      try {
+        const liveUser = await getUserProfile().catch(() => null);
+        if (liveUser) {
+          updateUser(liveUser);
+          setProfileData((prev) => ({
+            ...prev,
+            name: liveUser.name || prev.name,
+            email: liveUser.email || prev.email,
+          }));
+        }
+      } catch {}
+    };
+
+    fetchProfileAndStats();
+  }, []);
 
   // Load live statistics from backend
   useEffect(() => {
@@ -101,8 +120,19 @@ const Profile = () => {
   }, []);
 
   // Save profile edits
-  const handleSaveProfile = (updated) => {
-    const next = { ...profileData, ...updated };
+  const handleSaveProfile = async (updated) => {
+    const backendUser = await updateUserProfile({
+      name: updated.name,
+      email: updated.email,
+    });
+    updateUser(backendUser);
+
+    const next = {
+      ...profileData,
+      ...updated,
+      name: backendUser.name ?? updated.name,
+      email: backendUser.email ?? updated.email,
+    };
     setProfileData(next);
     try {
       localStorage.setItem(STORAGE_PROFILE_KEY, JSON.stringify(next));

@@ -18,6 +18,7 @@ const EditProfileModal = ({
   const {
     register,
     handleSubmit,
+    reset,
     formState: { errors, isSubmitting },
   } = useForm({
     defaultValues: {
@@ -27,13 +28,31 @@ const EditProfileModal = ({
     },
   });
 
+  React.useEffect(() => {
+    if (isOpen) {
+      reset({
+        name: initialData.name || '',
+        email: initialData.email || '',
+        bio: initialData.bio || '',
+      });
+      setPhotoUrl(initialData.photoUrl || null);
+    }
+  }, [isOpen, initialData, reset]);
+
   const onSubmit = async (data) => {
-    onSave?.({
-      ...data,
-      photoUrl,
-    });
-    toast('Profile updated successfully! ✨', 'success');
-    onClose();
+    try {
+      if (onSave) {
+        await onSave({
+          ...data,
+          photoUrl,
+        });
+      }
+      toast('Profile updated successfully! ✨', 'success');
+      onClose();
+    } catch (err) {
+      const errMsg = err.response?.data?.error?.message || err.message || 'Failed to update profile';
+      toast(errMsg, 'error');
+    }
   };
 
   return (

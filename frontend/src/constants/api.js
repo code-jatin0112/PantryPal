@@ -7,9 +7,13 @@ export const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3000/a
 
 // ── Auth ──────────────────────────────────────────────────
 export const AUTH = {
-  LOGIN:    '/auth/login',
-  REGISTER: '/auth/register',
-  ME:       '/auth/me',
+  LOGIN:           '/auth/login',
+  REGISTER:        '/auth/register',
+  ME:              '/auth/me',
+  PROFILE:         '/auth/profile',
+  CHANGE_PASSWORD: '/auth/change-password',
+  DELETE_ACCOUNT:  '/auth/account',
+  EXPORT:          '/auth/export',
 };
 
 // ── Pantry ────────────────────────────────────────────────
