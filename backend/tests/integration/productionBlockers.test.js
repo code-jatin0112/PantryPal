@@ -14,11 +14,14 @@ import {
   sanitizeDatabaseUrl,
 } from "../../src/utils/testDatabaseGuard.js";
 import {
+  deleteUserAccount,
   retryAccountDeletion,
   reconcilePendingAccountDeletions,
 } from "../../src/services/authService.js";
-import { getAuthLimiter, getAiLimiter } from "../../src/config/security.js";
+import { getAuthLimiter, getAiLimiter, sharedAiLimiter } from "../../src/config/security.js";
 import { generateAIResponse } from "../../src/services/aiService.js";
+import * as aiService from "../../src/services/aiService.js";
+import { generateRecipeFromPantry } from "../../src/services/aiRecipeService.js";
 import { errorHandler } from "../../src/middleware/errorHandler.js";
 
 describe("Phase 6 Production Release Blockers Suite", () => {
@@ -198,6 +201,125 @@ describe("Phase 6 Production Release Blockers Suite", () => {
       const userARecipes = await UnstructuredRecipe.find({ userId: userA.id });
       expect(userARecipes.length).toBe(0);
     });
+
+    it("fences in-flight recipe generation when account deletion occurs before persistence", async () => {
+      const pantryA = await prisma.pantry.create({
+        data: {
+          name: "User A Pantry",
+          userId: userA.id,
+          items: {
+            create: [
+              { name: "Pasta", quantity: 500, unit: "g" },
+              { name: "Tomato Sauce", quantity: 1, unit: "can" },
+            ],
+          },
+        },
+      });
+
+      const userBRecipesBefore = await UnstructuredRecipe.find({ userId: userB.id });
+      expect(userBRecipesBefore.length).toBeGreaterThanOrEqual(1);
+
+      const mockRecipe = {
+        title: "Quick Tomato Pasta",
+        description: "Simple pantry meal",
+        servings: 2,
+        prepTimeMinutes: 10,
+        cookTimeMinutes: 15,
+        estimatedCost: 5.5,
+        ingredients: [
+          { name: "Pasta", quantity: 200, unit: "g", available: true },
+          { name: "Tomato Sauce", quantity: 1, unit: "can", available: true },
+        ],
+        missingIngredients: [],
+        instructions: ["Boil pasta", "Mix with sauce"],
+        nutritionPerServing: { calories: 350, protein: 12, carbs: 65, fat: 4 },
+      };
+
+      const aiSpy = vi
+        .spyOn(aiService, "generateStructuredAIResponse")
+        .mockImplementation(async () => {
+          await deleteUserAccount({
+            userId: userA.id,
+            password: passwordA,
+          });
+          return mockRecipe;
+        });
+
+      const result = await generateRecipeFromPantry({
+        userId: userA.id,
+        pantryId: pantryA.id,
+      });
+
+      expect(result.recipe.title).toBe("Quick Tomato Pasta");
+
+      const deletedUser = await prisma.user.findUnique({ where: { id: userA.id } });
+      expect(deletedUser).toBeNull();
+
+      const userARecipes = await UnstructuredRecipe.find({ userId: userA.id });
+      expect(userARecipes).toHaveLength(0);
+
+      const userALogs = await AiInteractionLog.find({ userId: userA.id });
+      expect(userALogs).toHaveLength(0);
+
+      const userBRecipesAfter = await UnstructuredRecipe.find({ userId: userB.id });
+      expect(userBRecipesAfter.length).toBe(userBRecipesBefore.length);
+
+      aiSpy.mockRestore();
+    });
+
+    it("compensating rollback purges newly created document if user entered deletion concurrently", async () => {
+      const hashed = await hashPassword("TestPass123!");
+      const userC = await prisma.user.create({
+        data: {
+          name: "User C Race",
+          email: `userc-race-${Date.now()}@pantrypal.test`,
+          password: hashed,
+          isActive: true,
+        },
+      });
+
+      const pantryC = await prisma.pantry.create({
+        data: {
+          name: "User C Pantry",
+          userId: userC.id,
+          items: {
+            create: [{ name: "Rice", quantity: 1, unit: "kg" }],
+          },
+        },
+      });
+
+      const mockRecipe = {
+        title: "Fried Rice",
+        description: "Crispy rice dish",
+        servings: 1,
+        prepTimeMinutes: 5,
+        cookTimeMinutes: 10,
+        estimatedCost: 3.0,
+        ingredients: [{ name: "Rice", quantity: 200, unit: "g", available: true }],
+        missingIngredients: [],
+        instructions: ["Cook rice", "Fry"],
+      };
+
+      const aiSpy = vi
+        .spyOn(aiService, "generateStructuredAIResponse")
+        .mockImplementation(async () => {
+          await prisma.user.update({
+            where: { id: userC.id },
+            data: { isActive: false, deletionStatus: "PENDING_DELETION" },
+          });
+          return mockRecipe;
+        });
+
+      await generateRecipeFromPantry({
+        userId: userC.id,
+        pantryId: pantryC.id,
+      });
+
+      const userCRecipes = await UnstructuredRecipe.find({ userId: userC.id });
+      expect(userCRecipes).toHaveLength(0);
+
+      aiSpy.mockRestore();
+    });
   });
 
   // ── 2. Dedicated Authentication Rate Limiting ────────────────
@@ -302,6 +424,44 @@ describe("Phase 6 Production Release Blockers Suite", () => {
         .post("/api/v1/ai/chat")
         .set("Authorization", "Bearer token-user-2");
       expect(u2_r1.status).toBe(200);
+    });
+
+    it("shares rate limit quota across all AI endpoints using the unified limiter", async () => {
+      const testApp = express();
+      testApp.use(express.json());
+
+      testApp.use((req, res, next) => {
+        req.user = { id: "user-shared-limiter" };
+        next();
+      });
+
+      const unifiedLimiter = getAiLimiter({ max: 3, windowMs: 60000 });
+
+      testApp.post("/api/v1/ai/chat", unifiedLimiter, (req, res) =>
+        res.status(200).json({ endpoint: "chat" })
+      );
+      testApp.post("/api/v1/ai/recipes/generate", unifiedLimiter, (req, res) =>
+        res.status(200).json({ endpoint: "recipes" })
+      );
+      testApp.post("/api/v1/ai/recommendations", unifiedLimiter, (req, res) =>
+        res.status(200).json({ endpoint: "recommendations" })
+      );
+
+      const res1 = await supertest(testApp).post("/api/v1/ai/chat");
+      expect(res1.status).toBe(200);
+
+      const res2 = await supertest(testApp).post("/api/v1/ai/recipes/generate");
+      expect(res2.status).toBe(200);
+
+      const res3 = await supertest(testApp).post("/api/v1/ai/recommendations");
+      expect(res3.status).toBe(200);
+
+      const res4 = await supertest(testApp).post("/api/v1/ai/chat");
+      expect(res4.status).toBe(429);
+      expect(res4.body.error.code).toBe("RATE_LIMIT_EXCEEDED");
+
+      const res5 = await supertest(testApp).post("/api/v1/ai/recipes/generate");
+      expect(res5.status).toBe(429);
     });
 
     it("translates upstream Gemini quota exhaustion into HTTP 429 AI_QUOTA_EXCEEDED", async () => {
