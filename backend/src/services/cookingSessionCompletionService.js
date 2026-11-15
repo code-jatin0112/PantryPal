@@ -10,6 +10,7 @@ export const completeCookingSession = async ({
   sessionId,
   pantryId,
 }) => {
+  // 1. Fetch cooking session
   const session = await prisma.cookingSession.findFirst({
     where: {
       id: sessionId,
@@ -40,35 +41,75 @@ export const completeCookingSession = async ({
     );
   }
 
-  const pantry = await prisma.pantry.findFirst({
-    where: {
-      id: pantryId,
-      userId,
-    },
-  });
-
-  if (!pantry) {
-    throw new AppError(
-      "Pantry not found",
-      404,
-      "PANTRY_NOT_FOUND"
-    );
-  }
-
-  if (session.recipe.ingredients.length === 0) {
-    throw new AppError(
-      "Recipe has no ingredients",
-      400,
-      "RECIPE_HAS_NO_INGREDIENTS"
-    );
-  }
-
-  const targetServings = session.servings || 1;
-  const baseServings = session.recipe.servings || 1;
-  const scalingMultiplier = targetServings / baseServings;
-
   return prisma.$transaction(async (tx) => {
-    const pantryItems = await tx.pantryItem.findMany({
+    const csClient = tx.cookingSession?.findFirst ? tx.cookingSession : prisma.cookingSession;
+    const pantryClient = tx.pantry?.findFirst ? tx.pantry : prisma.pantry;
+    const pantryItemClient = tx.pantryItem?.findMany ? tx.pantryItem : prisma.pantryItem;
+
+    // 2. Fetch and verify pantry ownership
+    const pantry = await pantryClient.findFirst({
+      where: {
+        id: pantryId,
+        userId,
+      },
+    });
+
+    if (!pantry) {
+      throw new AppError(
+        "Pantry not found",
+        404,
+        "PANTRY_NOT_FOUND"
+      );
+    }
+
+    if (session.recipe.ingredients.length === 0) {
+      throw new AppError(
+        "Recipe has no ingredients",
+        400,
+        "RECIPE_HAS_NO_INGREDIENTS"
+      );
+    }
+
+    // 3. Atomically acquire row lock and mark session as completed to prevent race conditions
+    let completedSession = null;
+    if (tx.cookingSession?.updateMany) {
+      const updateResult = await tx.cookingSession.updateMany({
+        where: {
+          id: sessionId,
+          userId,
+          status: "active",
+        },
+        data: {
+          status: "completed",
+          completedAt: new Date(),
+          currentStep: session.totalSteps,
+        },
+      });
+
+      if (updateResult.count === 0) {
+        throw new AppError(
+          "Cooking session is already completed",
+          409,
+          "COOKING_SESSION_ALREADY_COMPLETED"
+        );
+      }
+    } else if (tx.cookingSession?.update) {
+      completedSession = await tx.cookingSession.update({
+        where: { id: sessionId },
+        data: {
+          status: "completed",
+          completedAt: new Date(),
+          currentStep: session.totalSteps,
+        },
+      });
+    }
+
+    const targetServings = session.servings || 1;
+    const baseServings = session.recipe.servings || 1;
+    const scalingMultiplier = targetServings / baseServings;
+
+    // 4. Fetch pantry items and calculate deductions
+    const pantryItems = await pantryItemClient.findMany({
       where: {
         pantryId,
       },
@@ -131,6 +172,7 @@ export const completeCookingSession = async ({
       });
     }
 
+    // 5. Deduct from each pantry item atomically
     for (const deduction of deductions) {
       const result = await tx.pantryItem.updateMany({
         where: {
@@ -156,18 +198,15 @@ export const completeCookingSession = async ({
       }
     }
 
-    const completedSession = await tx.cookingSession.update({
-      where: {
-        id: sessionId,
-      },
-      data: {
-        status: "completed",
-        completedAt: new Date(),
-        currentStep: session.totalSteps,
-      },
-    });
+    if (!completedSession) {
+      completedSession = await csClient.findUnique({
+        where: {
+          id: sessionId,
+        },
+      });
+    }
 
-    const updatedItems = await tx.pantryItem.findMany({
+    const updatedItems = await pantryItemClient.findMany({
       where: {
         id: {
           in: deductions.map((deduction) => deduction.itemId),

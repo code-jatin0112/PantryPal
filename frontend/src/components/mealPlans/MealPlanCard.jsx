@@ -15,7 +15,7 @@ const MealPlanCard = ({
   const endDate = mealPlan.endDate ? new Date(mealPlan.endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '';
   const dateRange = startDate && endDate ? `${startDate} – ${endDate}` : startDate || 'Flexible dates';
 
-  const dishesCount = mealPlan.dishes?.length ?? mealPlan._count?.dishes ?? mealPlan.mealCount ?? 0;
+  const dishesCount = (mealPlan.dishes || mealPlan.items)?.length ?? mealPlan._count?.dishes ?? mealPlan.mealCount ?? 0;
   const peopleCount = mealPlan.peopleCount || 2;
   const budget = mealPlan.budget !== undefined && mealPlan.budget !== null ? Number(mealPlan.budget) : null;
   const priority = (mealPlan.budgetPriority || 'medium').toLowerCase();

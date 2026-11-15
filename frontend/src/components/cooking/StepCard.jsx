@@ -21,6 +21,7 @@ const StepCard = ({
   onPrevious,
   onNext,
   onFinish,
+  finishLoading = false,
 }) => {
   const isLastStep = stepIndex === totalSteps - 1;
   const isFirstStep = stepIndex === 0;
@@ -159,6 +160,8 @@ const StepCard = ({
               variant="primary"
               size="md"
               icon={Sparkles}
+              loading={finishLoading}
+              disabled={finishLoading}
               onClick={onFinish}
               className="flex-1 sm:flex-initial bg-emerald-700 hover:bg-emerald-800"
             >

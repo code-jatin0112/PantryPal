@@ -139,6 +139,7 @@ export const updateMealPlanController = async (req, res, next) => {
       endDate: req.body.endDate,
       peopleCount: req.body.peopleCount,
       budget: req.body.budget,
+      dishes: req.body.dishes,
     });
 
     if (!mealPlan) {

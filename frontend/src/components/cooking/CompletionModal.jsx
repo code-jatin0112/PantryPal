@@ -12,6 +12,7 @@ const CompletionModal = ({
   servings = 4,
   onCookAgain,
   onBackToRecipes,
+  isRestarting = false,
 }) => {
   return (
     <Modal isOpen={isOpen} onClose={onClose} size="md">
@@ -64,10 +65,12 @@ const CompletionModal = ({
             variant="secondary"
             size="md"
             icon={RotateCcw}
+            loading={isRestarting}
+            disabled={isRestarting}
             onClick={onCookAgain}
             className="w-full sm:w-auto"
           >
-            Cook Again
+            {isRestarting ? 'Starting...' : 'Cook Again'}
           </Button>
           <Button
             type="button"

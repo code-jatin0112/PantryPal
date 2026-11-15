@@ -28,6 +28,31 @@ const MealPlanForm = ({
   const defaultStart = new Date().toISOString().split('T')[0];
   const defaultEnd = new Date(Date.now() + 6 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
+  const isEditing = Boolean(initialData);
+
+  const getInitialDishes = () => {
+    if (isEditing) {
+      const existingDishes = initialData?.dishes || initialData?.items;
+      if (Array.isArray(existingDishes)) {
+        return existingDishes.map((d) => ({
+          id: d.id,
+          recipeId: d.recipeId || d.recipe?.id || '',
+          mealType: d.mealType || 'Dinner',
+          plannedDate: d.plannedDate ? new Date(d.plannedDate).toISOString().split('T')[0] : defaultStart,
+          requestedServings: d.requestedServings || 2,
+          cuisine: d.cuisine || 'General',
+          budgetPriority: d.budgetPriority || 'medium',
+        }));
+      }
+      return [];
+    }
+
+    return [
+      { recipeId: '', mealType: 'Breakfast', plannedDate: defaultStart, requestedServings: 2, cuisine: 'General', budgetPriority: 'medium' },
+      { recipeId: '', mealType: 'Dinner', plannedDate: defaultStart, requestedServings: 2, cuisine: 'General', budgetPriority: 'medium' },
+    ];
+  };
+
   const {
     register,
     control,
@@ -42,19 +67,7 @@ const MealPlanForm = ({
       peopleCount: initialData?.peopleCount || 2,
       budget: initialData?.budget !== undefined && initialData?.budget !== null ? initialData.budget : '',
       budgetPriority: initialData?.budgetPriority || 'medium',
-      dishes: initialData?.dishes && initialData.dishes.length > 0
-        ? initialData.dishes.map((d) => ({
-            recipeId: d.recipeId || d.recipe?.id || '',
-            mealType: d.mealType || 'Dinner',
-            plannedDate: d.plannedDate ? new Date(d.plannedDate).toISOString().split('T')[0] : defaultStart,
-            requestedServings: d.requestedServings || 2,
-            cuisine: d.cuisine || 'General',
-            budgetPriority: d.budgetPriority || 'medium',
-          }))
-        : [
-            { recipeId: '', mealType: 'Breakfast', plannedDate: defaultStart, requestedServings: 2, cuisine: 'General', budgetPriority: 'medium' },
-            { recipeId: '', mealType: 'Dinner', plannedDate: defaultStart, requestedServings: 2, cuisine: 'General', budgetPriority: 'medium' },
-          ],
+      dishes: getInitialDishes(),
     },
   });
 
@@ -68,6 +81,7 @@ const MealPlanForm = ({
     const firstRecipeId = recipes[0]?.id;
 
     const formattedDishes = (data.dishes || []).map((dish) => ({
+      id: dish.id || undefined,
       recipeId: dish.recipeId || firstRecipeId || '00000000-0000-0000-0000-000000000000',
       mealType: dish.mealType || 'Dinner',
       plannedDate: new Date(dish.plannedDate).toISOString(),
@@ -214,11 +228,19 @@ const MealPlanForm = ({
         </div>
 
         <div className="space-y-3">
+          {fields.length === 0 && (
+            <div className="py-8 text-center bg-[var(--color-parchment)]/60 rounded-xl border border-dashed border-[rgba(138,144,112,0.25)] p-4">
+              <p className="text-xs text-[var(--color-sage)] font-semibold">
+                No meals scheduled yet. Click &ldquo;Add Meal&rdquo; above to assign your first recipe.
+              </p>
+            </div>
+          )}
           {fields.map((field, idx) => (
             <div
               key={field.id}
               className="p-3.5 bg-[var(--color-parchment)] rounded-xl border border-[rgba(138,144,112,0.12)] space-y-2.5"
             >
+              <input type="hidden" {...register(`dishes.${idx}.id`)} />
               <div className="flex items-center justify-between gap-2">
                 <span className="text-xs font-extrabold text-[var(--color-dark)]">
                   Meal #{idx + 1}

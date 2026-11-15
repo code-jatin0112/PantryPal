@@ -20,6 +20,15 @@ const mealPlanItemInclude = {
   },
 };
 
+const formatMealPlanResponse = (mealPlan) => {
+  if (!mealPlan) return null;
+  const dishes = mealPlan.items ?? [];
+  return {
+    ...mealPlan,
+    dishes,
+  };
+};
+
 const validateRecipeOwnership = async ({ userId, recipeId }) => {
   const recipe = await prisma.recipe.findFirst({
     where: {
@@ -118,7 +127,7 @@ export const createMealPlan = async ({
       },
     });
 
-    return mealPlan;
+    return formatMealPlanResponse(mealPlan);
   });
 };
 
@@ -127,7 +136,7 @@ export const getMealPlans = async ({
   startDate,
   endDate,
 }) => {
-  return prisma.mealPlan.findMany({
+  const mealPlans = await prisma.mealPlan.findMany({
     where: {
       userId,
       ...(startDate !== undefined &&
@@ -152,13 +161,15 @@ export const getMealPlans = async ({
       },
     },
   });
+
+  return mealPlans.map(formatMealPlanResponse);
 };
 
 export const getMealPlanById = async ({
   userId,
   mealPlanId,
 }) => {
-  return prisma.mealPlan.findFirst({
+  const mealPlan = await prisma.mealPlan.findFirst({
     where: {
       id: mealPlanId,
       userId,
@@ -172,6 +183,8 @@ export const getMealPlanById = async ({
       },
     },
   });
+
+  return formatMealPlanResponse(mealPlan);
 };
 
 export const updateMealPlan = async ({
@@ -182,41 +195,39 @@ export const updateMealPlan = async ({
   endDate,
   peopleCount,
   budget,
+  dishes,
 }) => {
-  const mealPlan = await prisma.mealPlan.findFirst({
-    where: {
-      id: mealPlanId,
-      userId,
-    },
-  });
+  const executeScalarUpdate = async (client) => {
+    const mealPlan = await client.mealPlan.findFirst({
+      where: {
+        id: mealPlanId,
+        userId,
+      },
+    });
 
-  if (!mealPlan) {
-    return null;
-  }
+    if (!mealPlan) {
+      return null;
+    }
 
-  const nextStartDate =
-    startDate !== undefined
-      ? new Date(startDate)
-      : mealPlan.startDate;
+    const nextStartDate =
+      startDate !== undefined
+        ? new Date(startDate)
+        : mealPlan.startDate;
 
-  const nextEndDate =
-    endDate !== undefined
-      ? new Date(endDate)
-      : mealPlan.endDate;
+    const nextEndDate =
+      endDate !== undefined
+        ? new Date(endDate)
+        : mealPlan.endDate;
 
-  if (nextEndDate < nextStartDate) {
-    throw new AppError(
-      "End date cannot precede start date",
-      400,
-      "INVALID_MEAL_PLAN_DATE_RANGE"
-    );
-  }
+    if (nextEndDate < nextStartDate) {
+      throw new AppError(
+        "End date cannot precede start date",
+        400,
+        "INVALID_MEAL_PLAN_DATE_RANGE"
+      );
+    }
 
-  return prisma.mealPlan.update({
-    where: {
-      id: mealPlanId,
-    },
-    data: {
+    const scalarUpdates = {
       ...(name !== undefined && { name }),
       ...(startDate !== undefined && {
         startDate: new Date(startDate),
@@ -226,15 +237,201 @@ export const updateMealPlan = async ({
       }),
       ...(peopleCount !== undefined && { peopleCount }),
       ...(budget !== undefined && { budget }),
-    },
-    include: {
-      items: {
-        include: mealPlanItemInclude,
-        orderBy: {
-          plannedDate: "asc",
+    };
+
+    const updated = await client.mealPlan.update({
+      where: {
+        id: mealPlanId,
+      },
+      data: scalarUpdates,
+      include: {
+        items: {
+          include: mealPlanItemInclude,
+          orderBy: {
+            plannedDate: "asc",
+          },
         },
       },
-    },
+    });
+
+    return formatMealPlanResponse(updated);
+  };
+
+  if (dishes === undefined) {
+    return executeScalarUpdate(prisma);
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const mealPlanClient = tx.mealPlan?.findFirst ? tx.mealPlan : prisma.mealPlan;
+    const recipeClient = tx.recipe?.findMany ? tx.recipe : prisma.recipe;
+    const itemClient = tx.mealPlanItem?.findMany ? tx.mealPlanItem : prisma.mealPlanItem;
+
+    const mealPlan = await mealPlanClient.findFirst({
+      where: {
+        id: mealPlanId,
+        userId,
+      },
+    });
+
+    if (!mealPlan) {
+      return null;
+    }
+
+    const nextStartDate =
+      startDate !== undefined
+        ? new Date(startDate)
+        : mealPlan.startDate;
+
+    const nextEndDate =
+      endDate !== undefined
+        ? new Date(endDate)
+        : mealPlan.endDate;
+
+    if (nextEndDate < nextStartDate) {
+      throw new AppError(
+        "End date cannot precede start date",
+        400,
+        "INVALID_MEAL_PLAN_DATE_RANGE"
+      );
+    }
+
+    const scalarUpdates = {
+      ...(name !== undefined && { name }),
+      ...(startDate !== undefined && {
+        startDate: new Date(startDate),
+      }),
+      ...(endDate !== undefined && {
+        endDate: new Date(endDate),
+      }),
+      ...(peopleCount !== undefined && { peopleCount }),
+      ...(budget !== undefined && { budget }),
+    };
+
+    if (Object.keys(scalarUpdates).length > 0) {
+      await mealPlanClient.update({
+        where: {
+          id: mealPlanId,
+        },
+        data: scalarUpdates,
+      });
+    }
+
+    // Synchronize dishes if provided
+    if (Array.isArray(dishes)) {
+      const recipeIds = [
+        ...new Set(dishes.map((dish) => dish.recipeId)),
+      ];
+
+      const validRecipes = await recipeClient.findMany({
+        where: {
+          id: {
+            in: recipeIds,
+          },
+          userId,
+        },
+        select: {
+          id: true,
+        },
+      });
+
+      const validRecipeIds = new Set(
+        validRecipes.map((recipe) => recipe.id)
+      );
+
+      const invalidRecipe = dishes.find(
+        (dish) => !validRecipeIds.has(dish.recipeId)
+      );
+
+      if (invalidRecipe) {
+        throw new AppError(
+          `Recipe not found: ${invalidRecipe.recipeId}`,
+          404,
+          "RECIPE_NOT_FOUND"
+        );
+      }
+
+      const currentItems = await itemClient.findMany({
+        where: { mealPlanId },
+      });
+      const currentMap = new Map(currentItems.map((i) => [i.id, i]));
+
+      // Validate that any submitted dish ID belongs to this meal plan
+      for (const dish of dishes) {
+        if (dish.id && !currentMap.has(dish.id)) {
+          throw new AppError(
+            `Invalid dish ID: ${dish.id}. Submitted dish does not belong to this meal plan`,
+            400,
+            "INVALID_MEAL_PLAN_DISH_ID"
+          );
+        }
+      }
+
+      const payloadIdSet = new Set(dishes.filter((d) => d.id).map((d) => d.id));
+
+      // Remove deleted dishes
+      const toDeleteIds = currentItems
+        .filter((curr) => !payloadIdSet.has(curr.id))
+        .map((curr) => curr.id);
+
+      if (toDeleteIds.length > 0) {
+        await itemClient.deleteMany({
+          where: { id: { in: toDeleteIds } },
+        });
+      }
+
+      // Add new or update existing dishes
+      for (const dish of dishes) {
+        if (!dish.id) {
+          await itemClient.create({
+            data: {
+              mealPlanId,
+              recipeId: dish.recipeId,
+              plannedDate: dish.plannedDate
+                ? new Date(dish.plannedDate)
+                : nextStartDate,
+              mealType: dish.mealType ?? "other",
+              requestedServings: dish.requestedServings,
+              cuisine: dish.cuisine,
+              recipePreference: dish.recipePreference,
+              dietaryRequirements: dish.dietaryRequirements,
+              budgetPriority: dish.budgetPriority,
+              otherPreferences: dish.otherPreferences,
+            },
+          });
+        } else {
+          await itemClient.update({
+            where: { id: dish.id },
+            data: {
+              recipeId: dish.recipeId,
+              plannedDate: dish.plannedDate
+                ? new Date(dish.plannedDate)
+                : undefined,
+              mealType: dish.mealType,
+              requestedServings: dish.requestedServings,
+              cuisine: dish.cuisine,
+              recipePreference: dish.recipePreference,
+              dietaryRequirements: dish.dietaryRequirements,
+              budgetPriority: dish.budgetPriority,
+              otherPreferences: dish.otherPreferences,
+            },
+          });
+        }
+      }
+    }
+
+    const updated = await mealPlanClient.findUnique({
+      where: { id: mealPlanId },
+      include: {
+        items: {
+          include: mealPlanItemInclude,
+          orderBy: {
+            plannedDate: "asc",
+          },
+        },
+      },
+    });
+
+    return formatMealPlanResponse(updated);
   });
 };
 

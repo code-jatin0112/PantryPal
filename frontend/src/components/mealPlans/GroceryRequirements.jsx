@@ -6,20 +6,37 @@ import { useToast } from '../../context/ToastContext';
 import { formatIngredientQuantity } from '../../utils/hoistingDemo';
 
 const GroceryRequirements = ({ requirements = [], mealPlanName = 'this meal plan' }) => {
-  const toast = useToast();
+  const rawToast = useToast();
+  const toast = (msg, type) => {
+    if (typeof rawToast === 'function') {
+      rawToast(msg, type);
+    }
+  };
   const [adding, setAdding] = useState(false);
-  const [addedIds, setAddedIds] = useState(new Set());
+  const [addedKeys, setAddedKeys] = useState(new Set());
 
   const items = Array.isArray(requirements)
     ? requirements
     : requirements?.missingItems || requirements?.items || [];
 
+  const getItemKey = (item) => {
+    if (!item) return '';
+    if (item.id) return String(item.id);
+    if (item.ingredientId) return String(item.ingredientId);
+    const name = (item.name || item.ingredientName || '').trim().toLowerCase();
+    const unit = (item.unit || '').trim().toLowerCase();
+    return `${name}::${unit}`;
+  };
+
+  const pendingItems = items.filter((item) => !addedKeys.has(getItemKey(item)));
+  const allAdded = items.length > 0 && pendingItems.length === 0;
+
   const handleAddAllToShoppingList = async () => {
-    if (items.length === 0) return;
+    if (pendingItems.length === 0) return;
     setAdding(true);
     try {
-      await Promise.allSettled(
-        items.map((item) =>
+      const results = await Promise.allSettled(
+        pendingItems.map((item) =>
           createShoppingListItem({
             name: item.name || item.ingredientName,
             quantity: item.missingQuantity || item.quantity || 1,
@@ -28,23 +45,43 @@ const GroceryRequirements = ({ requirements = [], mealPlanName = 'this meal plan
         )
       );
 
-      setAddedIds(new Set(items.map((_, idx) => idx)));
-      toast(`Added ${items.length} items to your shopping list! 🛒`, 'success');
+      const newlyAddedKeys = [];
+      let failureCount = 0;
+      results.forEach((res, i) => {
+        if (res.status === 'fulfilled') {
+          newlyAddedKeys.push(getItemKey(pendingItems[i]));
+        } else {
+          failureCount += 1;
+        }
+      });
+
+      if (newlyAddedKeys.length > 0) {
+        setAddedKeys((prev) => new Set([...prev, ...newlyAddedKeys]));
+      }
+
+      if (failureCount === 0) {
+        toast(`Added ${newlyAddedKeys.length} items to your shopping list! 🛒`, 'success');
+      } else if (newlyAddedKeys.length > 0) {
+        toast(`Added ${newlyAddedKeys.length} items, but ${failureCount} failed to save.`, 'warning');
+      } else {
+        toast('Failed to add items to shopping list.', 'error');
+      }
     } catch {
-      toast('Failed to add some items to shopping list.', 'error');
+      toast('Failed to add items to shopping list.', 'error');
     } finally {
       setAdding(false);
     }
   };
 
-  const handleAddSingleItem = async (item, idx) => {
+  const handleAddSingleItem = async (item) => {
+    const key = getItemKey(item);
     try {
       await createShoppingListItem({
         name: item.name || item.ingredientName,
         quantity: item.missingQuantity || item.quantity || 1,
         unit: item.unit || 'pcs',
       });
-      setAddedIds((prev) => new Set([...prev, idx]));
+      setAddedKeys((prev) => new Set([...prev, key]));
       toast(`Added "${item.name || item.ingredientName}" to shopping list!`, 'success');
     } catch {
       toast('Failed to add item.', 'error');
@@ -71,13 +108,18 @@ const GroceryRequirements = ({ requirements = [], mealPlanName = 'this meal plan
 
         {items.length > 0 && (
           <Button
-            variant="primary"
+            variant={allAdded ? 'secondary' : 'primary'}
             size="sm"
-            icon={ShoppingCart}
+            icon={allAdded ? Check : ShoppingCart}
             loading={adding}
+            disabled={allAdded || adding}
             onClick={handleAddAllToShoppingList}
           >
-            Add All to Shopping List
+            {allAdded
+              ? 'All Items Added'
+              : pendingItems.length < items.length
+              ? `Add Remaining (${pendingItems.length})`
+              : 'Add All to Shopping List'}
           </Button>
         )}
       </div>
@@ -91,7 +133,7 @@ const GroceryRequirements = ({ requirements = [], mealPlanName = 'this meal plan
       ) : (
         <div className="divide-y divide-[rgba(138,144,112,0.10)]">
           {items.map((item, idx) => {
-            const isAdded = addedIds.has(idx);
+            const isAdded = addedKeys.has(getItemKey(item));
             const name = item.name || item.ingredientName || 'Ingredient';
             const qty = item.missingQuantity || item.quantity || 1;
             const unit = item.unit || 'pcs';
@@ -99,7 +141,7 @@ const GroceryRequirements = ({ requirements = [], mealPlanName = 'this meal plan
 
             return (
               <div
-                key={idx}
+                key={getItemKey(item) || idx}
                 className="py-3 flex items-center justify-between gap-3 text-sm transition-colors"
               >
                 <div className="min-w-0">
@@ -121,7 +163,7 @@ const GroceryRequirements = ({ requirements = [], mealPlanName = 'this meal plan
                   size="sm"
                   icon={isAdded ? Check : Plus}
                   disabled={isAdded}
-                  onClick={() => handleAddSingleItem(item, idx)}
+                  onClick={() => handleAddSingleItem(item)}
                   className="flex-shrink-0"
                 >
                   {isAdded ? 'Added' : 'Add to List'}

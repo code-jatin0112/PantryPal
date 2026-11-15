@@ -214,6 +214,61 @@ export const updateMealPlanValidation = [
     .optional()
     .isFloat({ min: 0 })
     .withMessage("Budget must not be negative"),
+
+  body("dishes")
+    .optional({ nullable: true })
+    .isArray()
+    .withMessage("Dishes must be an array"),
+
+  body("dishes.*.id")
+    .optional({ nullable: true })
+    .isUUID()
+    .withMessage("Dish ID must be a valid UUID"),
+
+  body("dishes.*.recipeId")
+    .optional({ nullable: false })
+    .isUUID()
+    .withMessage("Recipe ID must be a valid UUID"),
+
+  body("dishes.*.plannedDate")
+    .optional()
+    .isISO8601()
+    .withMessage("Planned date must be a valid ISO 8601 date"),
+
+  body("dishes.*.mealType")
+    .optional()
+    .trim()
+    .notEmpty()
+    .withMessage("Meal type cannot be empty")
+    .isLength({ max: 30 })
+    .withMessage("Meal type must not exceed 30 characters"),
+
+  body("dishes.*.requestedServings")
+    .optional({ nullable: false })
+    .isInt({ min: 1 })
+    .withMessage("Requested servings must be a positive integer"),
+
+  body("dishes.*.cuisine")
+    .optional()
+    .trim()
+    .isLength({ max: 50 })
+    .withMessage("Cuisine must not exceed 50 characters"),
+
+  body("dishes.*.recipePreference")
+    .optional()
+    .trim()
+    .isLength({ max: 100 })
+    .withMessage("Recipe preference must not exceed 100 characters"),
+
+  dietaryRequirementsValidation("dishes.*.dietaryRequirements"),
+
+  body("dishes.*.budgetPriority")
+    .optional()
+    .trim()
+    .isIn(["low", "medium", "high"])
+    .withMessage("Budget priority must be low, medium, or high"),
+
+  otherPreferencesValidation("dishes.*.otherPreferences"),
 ];
 
 export const addMealPlanDishValidation = [

@@ -1,5 +1,11 @@
 import { body, param } from "express-validator";
 
+export const recipeIdParamValidation = [
+  param("recipeId")
+    .isUUID()
+    .withMessage("Recipe ID must be a valid UUID"),
+];
+
 export const startCookingSessionValidation = [
   param("recipeId")
     .isUUID()

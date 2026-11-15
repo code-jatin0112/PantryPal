@@ -1,6 +1,7 @@
 import {
   startCookingSession,
   getCookingSession,
+  getActiveCookingSession,
   updateCookingProgress,
 } from "../services/cookingSessionService.js";
 
@@ -13,6 +14,46 @@ export const startSession = async (req, res, next) => {
     });
 
     return res.status(201).json({
+      success: true,
+      data: {
+        session,
+      },
+    });
+  } catch (error) {
+    if (error.code === "ACTIVE_COOKING_SESSION_EXISTS") {
+      return res.status(409).json({
+        success: false,
+        error: {
+          code: error.code,
+          message: error.message,
+        },
+        data: {
+          session: error.session || null,
+        },
+      });
+    }
+    next(error);
+  }
+};
+
+export const getActiveSession = async (req, res, next) => {
+  try {
+    const session = await getActiveCookingSession({
+      userId: req.user.id,
+      recipeId: req.params.recipeId,
+    });
+
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        error: {
+          code: "ACTIVE_COOKING_SESSION_NOT_FOUND",
+          message: "No active cooking session found for this recipe",
+        },
+      });
+    }
+
+    return res.status(200).json({
       success: true,
       data: {
         session,
