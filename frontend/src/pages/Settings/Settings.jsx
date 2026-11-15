@@ -225,7 +225,11 @@ const Settings = () => {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
 
-      toast('Complete kitchen archive exported! 📦', 'success');
+      if (serverExport?.completeness === 'partial') {
+        toast('Archive exported with partial data (AI history unavailable).', 'warning');
+      } else {
+        toast('Complete kitchen archive exported! 📦', 'success');
+      }
     } catch (err) {
       toast(err.response?.data?.error?.message || 'Failed to export kitchen data', 'error');
     }

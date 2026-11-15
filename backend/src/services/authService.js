@@ -305,12 +305,40 @@ export const exportUserData = async ({ userId }) => {
     },
   });
 
-  if (!user || !user.isActive) {
+  if (!user || !user.isActive || user.deletionStatus === "PENDING_DELETION") {
     throw new AppError(
       "User account is not available",
       401,
       "USER_NOT_AVAILABLE"
     );
+  }
+
+  // Fetch MongoDB AI interaction history scoped strictly to userId
+  let aiLogs = [];
+  let aiLogsStatus = "not_configured";
+
+  if (process.env.MONGO_URI) {
+    try {
+      const { default: mongoose } = await import("mongoose");
+      const { connectMongo } = await import("../config/mongo.js");
+      if (mongoose.connection.readyState === 0) {
+        await connectMongo();
+      }
+      if (mongoose.connection.readyState === 1) {
+        const { AiInteractionLog } = await import("../models/AiInteractionLog.js");
+        if (AiInteractionLog) {
+          aiLogs = await AiInteractionLog.find({ userId })
+            .select("-_id -__v")
+            .lean();
+          aiLogsStatus = "included";
+        }
+      } else {
+        aiLogsStatus = "unavailable";
+      }
+    } catch (err) {
+      console.warn("⚠️ Failed to export AI interaction logs from MongoDB:", err.message);
+      aiLogsStatus = "unavailable";
+    }
   }
 
   const [
@@ -380,7 +408,12 @@ export const exportUserData = async ({ userId }) => {
 
   return {
     exportedAt: new Date().toISOString(),
-    version: "1.0.0",
+    version: "1.1.0",
+    completeness: aiLogsStatus === "unavailable" ? "partial" : "complete",
+    dataSources: {
+      relational: "postgresql",
+      telemetry: aiLogsStatus,
+    },
     account: user,
     preferences: preferences
       ? {
@@ -394,5 +427,6 @@ export const exportUserData = async ({ userId }) => {
     mealPlans,
     favorites,
     cookingSessions,
+    aiInteractionHistory: aiLogs,
   };
 };
