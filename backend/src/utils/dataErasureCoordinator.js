@@ -2,23 +2,65 @@ import prisma from "../config/database.js";
 import { sanitizeDatabaseUrl } from "./testDatabaseGuard.js";
 
 /**
+ * Deterministically compute the unique obligation key.
+ * Prevents multiple document-level obligations for the same user from overwriting each other,
+ * and cleanly distinguishes ACCOUNT_DELETION obligations from DOCUMENT_CLEANUP obligations.
+ */
+export const computeObligationKey = ({
+  type = "ACCOUNT_DELETION",
+  userId,
+  targetCollection = "ALL",
+  documentId = null,
+}) => {
+  if (type === "ACCOUNT_DELETION") {
+    return `ACCOUNT:${userId}`;
+  }
+  return `DOC:${userId}:${targetCollection}:${documentId || "UNKNOWN"}`;
+};
+
+/**
  * Persist or update a durable deletion obligation that survives process restarts
  * and does not depend on a PostgreSQL User row.
+ *
+ * Guarantees:
+ * - Differentiates ACCOUNT_DELETION from DOCUMENT_CLEANUP
+ * - Prevents multiple document obligations for the same user from colliding
+ * - Throws if neither PostgreSQL nor MongoDB could persist the obligation (never falsely claims durability)
  */
 export const recordDeletionObligation = async ({
+  tx = null,
+  type = "ACCOUNT_DELETION",
   userId,
   targetCollection = "ALL",
   documentId = null,
   status = "PENDING",
   error = null,
 }) => {
+  if (!userId) {
+    throw new Error("User ID is required to record a deletion obligation");
+  }
+
+  const obligationKey = computeObligationKey({
+    type,
+    userId,
+    targetCollection,
+    documentId,
+  });
   const lastError = error ? sanitizeDatabaseUrl(String(error)) : null;
 
+  let pgSuccess = false;
+  let mongoSuccess = false;
+  let pgError = null;
+  let mongoError = null;
+
   // 1. Durably record in PostgreSQL AccountDeletionObligation
+  const pgClient = tx || prisma;
   try {
-    await prisma.accountDeletionObligation.upsert({
-      where: { userId },
+    await pgClient.accountDeletionObligation.upsert({
+      where: { obligationKey },
       create: {
+        obligationKey,
+        type,
         userId,
         targetCollection,
         documentId: documentId ? String(documentId) : null,
@@ -26,37 +68,145 @@ export const recordDeletionObligation = async ({
         lastError,
       },
       update: {
-        targetCollection,
-        documentId: documentId ? String(documentId) : null,
-        status,
-        lastError,
-      },
-    });
-  } catch (pgErr) {
-    console.error(
-      "[DataErasure] Failed to persist obligation to PostgreSQL:",
-      sanitizeDatabaseUrl(pgErr.message)
-    );
-  }
-
-  // 2. Durably record in MongoDB DeletionObligation (if MongoDB is connected)
-  try {
-    const { DeletionObligation } = await import("../models/DeletionObligation.js");
-    await DeletionObligation.findOneAndUpdate(
-      { userId },
-      {
+        type,
         userId,
         targetCollection,
         documentId: documentId ? String(documentId) : null,
         status,
         lastError,
       },
-      { upsert: true, returnDocument: "after" }
+    });
+    pgSuccess = true;
+  } catch (err) {
+    pgError = err;
+    console.error(
+      "[DataErasure] Failed to persist obligation to PostgreSQL:",
+      sanitizeDatabaseUrl(err.message)
     );
-  } catch (mongoErr) {
+  }
+
+  // 2. Durably record in MongoDB DeletionObligation (if MongoDB is connected / configured)
+  if (process.env.MONGO_URI || process.env.MONGO_TEST_URI) {
+    try {
+      const { default: mongoose } = await import("mongoose");
+      const { connectMongo } = await import("../config/mongo.js");
+      if (mongoose.connection.readyState === 0) {
+        await connectMongo();
+      }
+      if (mongoose.connection.readyState === 1) {
+        const { DeletionObligation } = await import("../models/DeletionObligation.js");
+        if (DeletionObligation) {
+          await DeletionObligation.findOneAndUpdate(
+            { obligationKey },
+            {
+              obligationKey,
+              type,
+              userId,
+              targetCollection,
+              documentId: documentId ? String(documentId) : null,
+              status,
+              lastError,
+            },
+            { upsert: true, returnDocument: "after" }
+          );
+          mongoSuccess = true;
+        }
+      }
+    } catch (err) {
+      mongoError = err;
+      console.warn(
+        "[DataErasure] Failed to persist obligation to MongoDB:",
+        sanitizeDatabaseUrl(err.message)
+      );
+    }
+  }
+
+  // CRITICAL DURABILITY GUARD:
+  // If neither datastore persisted the obligation, throw immediately.
+  // Never falsely claim durable recovery when persistence fails across all stores.
+  if (!pgSuccess && !mongoSuccess) {
+    const errorMsg = `CRITICAL: Failed to durably persist deletion obligation to any datastore. PG error: ${pgError?.message}; Mongo error: ${mongoError?.message}`;
+    console.error(`[DataErasure] ${errorMsg}`);
+    throw new Error(errorMsg);
+  }
+
+  return { obligationKey, pgSuccess, mongoSuccess };
+};
+
+/**
+ * Transactionally remove or finalize completed deletion obligations in PostgreSQL.
+ * If running inside a transaction (tx), the marker removal commits ONLY when tx commits.
+ */
+export const resolvePostgresDeletionObligation = async ({
+  tx = null,
+  obligationKey = null,
+  userId = null,
+  type = null,
+} = {}) => {
+  const pgClient = tx || prisma;
+  try {
+    const where = {};
+    if (obligationKey) {
+      where.obligationKey = obligationKey;
+    } else if (userId) {
+      where.userId = userId;
+      if (type) {
+        where.type = type;
+      }
+    } else {
+      return;
+    }
+    await pgClient.accountDeletionObligation.deleteMany({ where });
+  } catch (err) {
     console.warn(
-      "[DataErasure] Failed to persist obligation to MongoDB:",
-      sanitizeDatabaseUrl(mongoErr.message)
+      "[DataErasure] Failed to remove obligation from PostgreSQL:",
+      sanitizeDatabaseUrl(err.message)
+    );
+    if (tx) {
+      throw err;
+    }
+  }
+};
+
+/**
+ * Remove completed deletion obligations from MongoDB.
+ * MUST be executed ONLY AFTER the PostgreSQL transaction has committed.
+ */
+export const resolveMongoDeletionObligation = async ({
+  obligationKey = null,
+  userId = null,
+  type = null,
+} = {}) => {
+  if (!process.env.MONGO_URI && !process.env.MONGO_TEST_URI) {
+    return;
+  }
+  try {
+    const { default: mongoose } = await import("mongoose");
+    const { connectMongo } = await import("../config/mongo.js");
+    if (mongoose.connection.readyState === 0) {
+      await connectMongo();
+    }
+    if (mongoose.connection.readyState === 1) {
+      const { DeletionObligation } = await import("../models/DeletionObligation.js");
+      if (DeletionObligation) {
+        const filter = {};
+        if (obligationKey) {
+          filter.obligationKey = obligationKey;
+        } else if (userId) {
+          filter.userId = userId;
+          if (type) {
+            filter.type = type;
+          }
+        } else {
+          return;
+        }
+        await DeletionObligation.deleteMany(filter);
+      }
+    }
+  } catch (err) {
+    console.warn(
+      "[DataErasure] Failed to remove obligation from MongoDB:",
+      sanitizeDatabaseUrl(err.message)
     );
   }
 };
@@ -64,27 +214,10 @@ export const recordDeletionObligation = async ({
 /**
  * Remove or finalize completed deletion obligations across PostgreSQL and MongoDB.
  */
-export const resolveDeletionObligation = async (userId) => {
-  try {
-    await prisma.accountDeletionObligation.deleteMany({
-      where: { userId },
-    });
-  } catch (pgErr) {
-    console.warn(
-      "[DataErasure] Failed to remove obligation from PostgreSQL:",
-      sanitizeDatabaseUrl(pgErr.message)
-    );
-  }
-
-  try {
-    const { DeletionObligation } = await import("../models/DeletionObligation.js");
-    await DeletionObligation.deleteMany({ userId });
-  } catch (mongoErr) {
-    console.warn(
-      "[DataErasure] Failed to remove obligation from MongoDB:",
-      sanitizeDatabaseUrl(mongoErr.message)
-    );
-  }
+export const resolveDeletionObligation = async (target) => {
+  const params = typeof target === "string" ? { userId: target } : target;
+  await resolvePostgresDeletionObligation(params);
+  await resolveMongoDeletionObligation(params);
 };
 
 /**
@@ -121,14 +254,15 @@ export const safePersistUserMongoRecord = async ({
         return null;
       }
 
-      // 3. Check if an active deletion obligation exists
+      // 3. Check if an active account deletion obligation exists
+      // Note: DOCUMENT_CLEANUP obligations do NOT block active users from using AI features!
       const [obligation] = await tx.$queryRaw`
-        SELECT id, status FROM "AccountDeletionObligation" WHERE "userId" = ${userId}
+        SELECT id, status FROM "AccountDeletionObligation" WHERE "userId" = ${userId} AND "type" = 'ACCOUNT_DELETION'
       `;
 
       if (obligation) {
         console.warn(
-          `[DataErasure] Blocked persist for user ${userId}: active deletion obligation found (${obligation.status}).`
+          `[DataErasure] Blocked persist for user ${userId}: active account deletion obligation found (${obligation.status}).`
         );
         return null;
       }
@@ -150,14 +284,14 @@ export const safePersistUserMongoRecord = async ({
       }
 
       // 5. Post-write verification fence:
-      // Verify that the user was not concurrently deactivated or queued for deletion
+      // Verify that the user was not concurrently deactivated or queued for account deletion
       let stillActive = true;
       try {
         const [verifyRow] = await tx.$queryRaw`
           SELECT id, "isActive", "deletionStatus" FROM "User" WHERE id = ${userId}
         `;
         const [verifyObligation] = await tx.$queryRaw`
-          SELECT id FROM "AccountDeletionObligation" WHERE "userId" = ${userId}
+          SELECT id FROM "AccountDeletionObligation" WHERE "userId" = ${userId} AND "type" = 'ACCOUNT_DELETION'
         `;
         if (
           !verifyRow ||
@@ -190,12 +324,13 @@ export const safePersistUserMongoRecord = async ({
           console.log(`[DataErasure] Successfully rolled back doc ${createdDoc._id}`);
           return null;
         } catch (rollbackErr) {
-          // DO NOT SWALLOW: Record durable obligation and throw
+          // DO NOT SWALLOW: Record durable DOCUMENT_CLEANUP obligation and throw
           console.error(
             `[DataErasure] CRITICAL: Compensating rollback failed for doc ${createdDoc._id}:`,
             rollbackErr.message
           );
           await recordDeletionObligation({
+            type: "DOCUMENT_CLEANUP",
             userId,
             targetCollection,
             documentId: String(createdDoc._id),

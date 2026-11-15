@@ -235,7 +235,9 @@ model CookingSession {
 
 model AccountDeletionObligation {
   id               String   @id @default(uuid())
-  userId           String   @unique
+  obligationKey    String   @unique
+  type             String   @default("ACCOUNT_DELETION")
+  userId           String
   targetCollection String   @default("ALL")
   documentId       String?
   status           String   @default("PENDING")
@@ -246,4 +248,5 @@ model AccountDeletionObligation {
 
   @@index([status])
   @@index([userId])
+  @@index([type])
 }

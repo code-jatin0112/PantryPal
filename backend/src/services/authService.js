@@ -4,7 +4,10 @@ import { generateAccessToken } from "../utils/token.js";
 import AppError from "../utils/AppError.js";
 import { sanitizeDatabaseUrl } from "../utils/testDatabaseGuard.js";
 import {
+  computeObligationKey,
   recordDeletionObligation,
+  resolvePostgresDeletionObligation,
+  resolveMongoDeletionObligation,
   resolveDeletionObligation,
 } from "../utils/dataErasureCoordinator.js";
 
@@ -299,6 +302,7 @@ export const deleteUserAccount = async ({ userId, password }) => {
 
   let deletionSuccess = false;
   let cleanupError = null;
+  const obligationKey = computeObligationKey({ type: "ACCOUNT_DELETION", userId });
 
   await prisma.$transaction(
     async (tx) => {
@@ -319,7 +323,10 @@ export const deleteUserAccount = async ({ userId, password }) => {
       });
 
       // 3. Durably record deletion obligation before deleting user row
+      // Note: recorded transactionally in tx for PostgreSQL and in MongoDB
       await recordDeletionObligation({
+        tx,
+        type: "ACCOUNT_DELETION",
         userId,
         targetCollection: "ALL",
         status: "IN_PROGRESS",
@@ -346,6 +353,8 @@ export const deleteUserAccount = async ({ userId, password }) => {
           data: { deletionStatus: "DELETION_FAILED" },
         });
         await recordDeletionObligation({
+          tx,
+          type: "ACCOUNT_DELETION",
           userId,
           targetCollection: "ALL",
           status: "FAILED",
@@ -359,8 +368,9 @@ export const deleteUserAccount = async ({ userId, password }) => {
         where: { id: userId },
       });
 
-      // 6. Resolve completed deletion obligation
-      await resolveDeletionObligation(userId);
+      // 6. Transactionally resolve PostgreSQL deletion obligation marker inside tx
+      // If tx rolls back, this deletion rolls back with it!
+      await resolvePostgresDeletionObligation({ tx, obligationKey, userId });
       deletionSuccess = true;
     },
     { timeout: 30000 }
@@ -373,6 +383,9 @@ export const deleteUserAccount = async ({ userId, password }) => {
       "TELEMETRY_CLEANUP_FAILED"
     );
   }
+
+  // 7. Resolve MongoDB deletion obligation markers ONLY AFTER PostgreSQL transaction commits!
+  await resolveMongoDeletionObligation({ obligationKey, userId });
 
   return {
     message: "Account and associated data deleted successfully",
@@ -435,6 +448,7 @@ export const retryAccountDeletion = async ({ email, password, userId }) => {
 
   let retrySuccess = false;
   let cleanupError = null;
+  const obligationKey = computeObligationKey({ type: "ACCOUNT_DELETION", userId: user.id });
 
   await prisma.$transaction(
     async (tx) => {
@@ -454,6 +468,8 @@ export const retryAccountDeletion = async ({ email, password, userId }) => {
 
       // 3. Mark obligation IN_PROGRESS
       await recordDeletionObligation({
+        tx,
+        type: "ACCOUNT_DELETION",
         userId: user.id,
         targetCollection: "ALL",
         status: "IN_PROGRESS",
@@ -477,6 +493,8 @@ export const retryAccountDeletion = async ({ email, password, userId }) => {
           data: { deletionStatus: "DELETION_FAILED" },
         });
         await recordDeletionObligation({
+          tx,
+          type: "ACCOUNT_DELETION",
           userId: user.id,
           targetCollection: "ALL",
           status: "FAILED",
@@ -490,8 +508,8 @@ export const retryAccountDeletion = async ({ email, password, userId }) => {
         where: { id: user.id },
       });
 
-      // 6. Resolve obligation
-      await resolveDeletionObligation(user.id);
+      // 6. Transactionally resolve PostgreSQL deletion obligation inside tx
+      await resolvePostgresDeletionObligation({ tx, obligationKey, userId: user.id });
       retrySuccess = true;
     },
     { timeout: 30000 }
@@ -505,6 +523,9 @@ export const retryAccountDeletion = async ({ email, password, userId }) => {
     );
   }
 
+  // 7. Resolve MongoDB deletion obligation markers ONLY AFTER PostgreSQL transaction commits!
+  await resolveMongoDeletionObligation({ obligationKey, userId: user.id });
+
   return {
     status: "COMPLETED",
     message: "Account and associated data deleted successfully",
@@ -515,8 +536,13 @@ let isReconciliationRunning = false;
 
 /**
  * Server-side durable scheduled reconciliation.
- * Automatically recovers pending accounts across process restarts or network outages.
- * Guarantees no overlapping runs and never throws unhandled rejections during outages.
+ * Automatically recovers pending accounts and failed document cleanups across process restarts or outages.
+ *
+ * Guarantees:
+ * 1. Cleanly separates DOCUMENT_CLEANUP from ACCOUNT_DELETION.
+ * 2. For DOCUMENT_CLEANUP: deletes ONLY the targeted MongoDB document; NEVER deletes the active PostgreSQL User or application data.
+ * 3. For ACCOUNT_DELETION: verifies explicit deletion intent before finalizing account cascade.
+ * 4. Transactional ordering: PostgreSQL markers are deleted on tx inside the transaction; MongoDB markers are deleted after commit.
  */
 export const reconcilePendingAccountDeletions = async () => {
   if (isReconciliationRunning) {
@@ -526,7 +552,129 @@ export const reconcilePendingAccountDeletions = async () => {
 
   isReconciliationRunning = true;
   try {
-    // 1. Query pending accounts from PostgreSQL User
+    let reconciled = 0;
+    let failed = 0;
+
+    // ─────────────────────────────────────────────────────────────
+    // PART 1: DOCUMENT_CLEANUP OBLIGATIONS (Document-only cleanup)
+    // ─────────────────────────────────────────────────────────────
+    let pgDocObligations = [];
+    try {
+      pgDocObligations = await prisma.accountDeletionObligation.findMany({
+        where: {
+          type: "DOCUMENT_CLEANUP",
+          status: { in: ["PENDING", "FAILED", "IN_PROGRESS"] },
+        },
+      });
+    } catch (pgDocErr) {
+      console.warn(
+        "[Reconciliation] Failed to query PostgreSQL document obligations:",
+        sanitizeDatabaseUrl(pgDocErr.message)
+      );
+    }
+
+    let mongoDocObligations = [];
+    if (process.env.MONGO_URI || process.env.MONGO_TEST_URI) {
+      try {
+        const { default: mongoose } = await import("mongoose");
+        const { connectMongo } = await import("../config/mongo.js");
+        if (mongoose.connection.readyState === 0) {
+          await connectMongo();
+        }
+        if (mongoose.connection.readyState === 1) {
+          const { DeletionObligation } = await import("../models/DeletionObligation.js");
+          if (DeletionObligation) {
+            mongoDocObligations = await DeletionObligation.find({
+              type: "DOCUMENT_CLEANUP",
+              status: { $in: ["PENDING", "FAILED", "IN_PROGRESS"] },
+            }).lean();
+          }
+        }
+      } catch (mongoDocErr) {
+        console.warn(
+          "[Reconciliation] Failed to query MongoDB document obligations:",
+          sanitizeDatabaseUrl(mongoDocErr.message)
+        );
+      }
+    }
+
+    // Deduplicate document obligations by obligationKey
+    const docObligationsMap = new Map();
+    for (const ob of [...pgDocObligations, ...mongoDocObligations]) {
+      if (ob.obligationKey && !docObligationsMap.has(ob.obligationKey)) {
+        docObligationsMap.set(ob.obligationKey, ob);
+      }
+    }
+
+    if (docObligationsMap.size > 0) {
+      console.log(`[Reconciliation] Found ${docObligationsMap.size} document cleanup obligation(s).`);
+    }
+
+    for (const [obligationKey, ob] of docObligationsMap.entries()) {
+      const { userId, targetCollection, documentId } = ob;
+      try {
+        let docSuccess = false;
+
+        await prisma.$transaction(
+          async (tx) => {
+            // Acquire advisory lock
+            await tx.$executeRaw`
+              SELECT pg_advisory_xact_lock(hashtext(${ "pantrypal_user_lock" }), hashtext(${userId}))
+            `;
+
+            // Delete ONLY the specific MongoDB document
+            if (process.env.MONGO_URI || process.env.MONGO_TEST_URI) {
+              if (targetCollection === "UnstructuredRecipe" && documentId) {
+                const { UnstructuredRecipe } = await import("../models/UnstructuredRecipe.js");
+                await UnstructuredRecipe.deleteOne({ _id: documentId });
+              } else if (targetCollection === "AiInteractionLog" && documentId) {
+                const { AiInteractionLog } = await import("../models/AiInteractionLog.js");
+                await AiInteractionLog.deleteOne({ _id: documentId });
+              }
+            }
+
+            // CRITICAL SAFETY GUARD:
+            // NEVER delete or modify the PostgreSQL User!
+            // NEVER delete any other application data!
+
+            // Transactionally resolve PostgreSQL document obligation marker inside tx
+            await resolvePostgresDeletionObligation({ tx, obligationKey });
+            docSuccess = true;
+          },
+          { timeout: 30000 }
+        );
+
+        if (docSuccess) {
+          // Resolve MongoDB marker after transaction commits
+          await resolveMongoDeletionObligation({ obligationKey });
+          console.log(`[Reconciliation] Successfully cleaned document ${documentId} (${targetCollection}) for user ${userId}`);
+          reconciled++;
+        }
+      } catch (docErr) {
+        console.error(
+          `[Reconciliation] Failed document cleanup for ${obligationKey}:`,
+          sanitizeDatabaseUrl(docErr.message)
+        );
+        try {
+          await recordDeletionObligation({
+            type: "DOCUMENT_CLEANUP",
+            userId,
+            targetCollection,
+            documentId,
+            status: "FAILED",
+            error: docErr.message,
+          });
+        } catch (recErr) {
+          // Logged inside recordDeletionObligation
+        }
+        failed++;
+      }
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // PART 2: ACCOUNT_DELETION OBLIGATIONS (Full account finalization)
+    // ─────────────────────────────────────────────────────────────
+    // Query users with explicit deletion intent in PostgreSQL
     let pendingUsers = [];
     try {
       pendingUsers = await prisma.user.findMany({
@@ -544,27 +692,28 @@ export const reconcilePendingAccountDeletions = async () => {
         "[Reconciliation] Failed to query pending accounts (temporary database outage):",
         sanitizeDatabaseUrl(queryErr.message)
       );
-      return { reconciled: 0, failed: 0, error: sanitizeDatabaseUrl(queryErr.message) };
+      return { reconciled, failed, error: sanitizeDatabaseUrl(queryErr.message) };
     }
 
-    // 2. Query durable deletion obligations from PostgreSQL
-    let pgObligations = [];
+    // Query ACCOUNT_DELETION obligations from PostgreSQL
+    let pgAccountObligations = [];
     try {
-      pgObligations = await prisma.accountDeletionObligation.findMany({
+      pgAccountObligations = await prisma.accountDeletionObligation.findMany({
         where: {
+          type: "ACCOUNT_DELETION",
           status: { in: ["PENDING", "FAILED", "IN_PROGRESS"] },
         },
-        select: { userId: true },
+        select: { userId: true, obligationKey: true },
       });
     } catch (pgObErr) {
       console.warn(
-        "[Reconciliation] Failed to query PostgreSQL obligations:",
+        "[Reconciliation] Failed to query PostgreSQL account obligations:",
         sanitizeDatabaseUrl(pgObErr.message)
       );
     }
 
-    // 3. Query durable deletion obligations from MongoDB (if available)
-    let mongoObligations = [];
+    // Query ACCOUNT_DELETION obligations from MongoDB
+    let mongoAccountObligations = [];
     if (process.env.MONGO_URI || process.env.MONGO_TEST_URI) {
       try {
         const { default: mongoose } = await import("mongoose");
@@ -575,39 +724,39 @@ export const reconcilePendingAccountDeletions = async () => {
         if (mongoose.connection.readyState === 1) {
           const { DeletionObligation } = await import("../models/DeletionObligation.js");
           if (DeletionObligation) {
-            mongoObligations = await DeletionObligation.find({
+            mongoAccountObligations = await DeletionObligation.find({
+              type: "ACCOUNT_DELETION",
               status: { $in: ["PENDING", "FAILED", "IN_PROGRESS"] },
-            }).select("userId").lean();
+            }).select("userId obligationKey").lean();
           }
         }
       } catch (mongoObErr) {
         console.warn(
-          "[Reconciliation] Failed to query MongoDB obligations:",
+          "[Reconciliation] Failed to query MongoDB account obligations:",
           sanitizeDatabaseUrl(mongoObErr.message)
         );
       }
     }
 
-    // Deduplicate user IDs across all sources
-    const targetUserIds = [
+    // Deduplicate candidate account user IDs
+    const candidateAccountUserIds = [
       ...new Set([
         ...pendingUsers.map((u) => u.id),
-        ...pgObligations.map((o) => o.userId),
-        ...mongoObligations.map((o) => o.userId),
+        ...pgAccountObligations.map((o) => o.userId),
+        ...mongoAccountObligations.map((o) => o.userId),
       ]),
     ];
 
-    if (!targetUserIds || targetUserIds.length === 0) {
-      return { reconciled: 0, failed: 0 };
+    if (candidateAccountUserIds.length > 0) {
+      console.log(`[Reconciliation] Found ${candidateAccountUserIds.length} candidate account(s) for deletion reconciliation.`);
     }
 
-    console.log(`[Reconciliation] Found ${targetUserIds.length} target(s) for deletion reconciliation.`);
-
-    let reconciled = 0;
-    let failed = 0;
-
-    for (const targetUserId of targetUserIds) {
+    for (const targetUserId of candidateAccountUserIds) {
+      const obligationKey = computeObligationKey({ type: "ACCOUNT_DELETION", userId: targetUserId });
       try {
+        let accountFinalized = false;
+        let cleanupErr = null;
+
         await prisma.$transaction(
           async (tx) => {
             // Acquire transaction-level advisory lock
@@ -615,14 +764,25 @@ export const reconcilePendingAccountDeletions = async () => {
               SELECT pg_advisory_xact_lock(hashtext(${ "pantrypal_user_lock" }), hashtext(${targetUserId}))
             `;
 
-            // Check if user still exists in PostgreSQL
+            // Check if user exists in PostgreSQL
             const [freshUser] = await tx.$queryRaw`
-              SELECT id, "deletionStatus" FROM "User" WHERE id = ${targetUserId}
+              SELECT id, "isActive", "deletionStatus" FROM "User" WHERE id = ${targetUserId}
             `;
 
-            // Clean up MongoDB data
+            // CRITICAL SAFETY GUARD:
+            // If the user exists in PostgreSQL, they MUST have deletionStatus of PENDING_DELETION or DELETION_FAILED!
+            // If the user is active with no deletionStatus, NEVER DELETE!
+            if (freshUser && freshUser.deletionStatus !== "PENDING_DELETION" && freshUser.deletionStatus !== "DELETION_FAILED") {
+              console.warn(
+                `[Reconciliation] SECURITY GUARD: User ${targetUserId} exists and is active without deletionStatus. Skipping account deletion!`
+              );
+              // Clean up any stale or spurious ACCOUNT_DELETION obligation marker so it doesn't loop
+              await resolvePostgresDeletionObligation({ tx, obligationKey, userId: targetUserId });
+              return;
+            }
+
+            // Clean up all MongoDB data for this account
             let mongoSuccess = true;
-            let cleanupErr = null;
             if (process.env.MONGO_URI || process.env.MONGO_TEST_URI) {
               try {
                 await cleanUserMongoData(targetUserId);
@@ -647,10 +807,10 @@ export const reconcilePendingAccountDeletions = async () => {
                   }
                 }
               }
-              // Resolve durable obligations across PostgreSQL and MongoDB
-              await resolveDeletionObligation(targetUserId);
-              console.log(`[Reconciliation] Successfully finalized deletion for user ${targetUserId}`);
-              reconciled++;
+
+              // Resolve PostgreSQL account deletion obligation marker TRANSACTIONALLY
+              await resolvePostgresDeletionObligation({ tx, obligationKey, userId: targetUserId });
+              accountFinalized = true;
             } else {
               if (freshUser) {
                 await tx.user.update({
@@ -659,6 +819,8 @@ export const reconcilePendingAccountDeletions = async () => {
                 });
               }
               await recordDeletionObligation({
+                tx,
+                type: "ACCOUNT_DELETION",
                 userId: targetUserId,
                 targetCollection: "ALL",
                 status: "FAILED",
@@ -669,6 +831,13 @@ export const reconcilePendingAccountDeletions = async () => {
           },
           { timeout: 30000 }
         );
+
+        if (accountFinalized) {
+          // Resolve MongoDB account deletion markers ONLY AFTER transaction commits!
+          await resolveMongoDeletionObligation({ obligationKey, userId: targetUserId });
+          console.log(`[Reconciliation] Successfully finalized account deletion for user ${targetUserId}`);
+          reconciled++;
+        }
       } catch (userErr) {
         console.error(
           `[Reconciliation] Error reconciling user ${targetUserId}:`,

@@ -2,6 +2,18 @@ import mongoose from "mongoose";
 
 const DeletionObligationSchema = new mongoose.Schema(
   {
+    obligationKey: {
+      type: String,
+      required: [true, "Obligation key is required"],
+      unique: true,
+      index: true,
+    },
+    type: {
+      type: String,
+      enum: ["ACCOUNT_DELETION", "DOCUMENT_CLEANUP"],
+      default: "ACCOUNT_DELETION",
+      index: true,
+    },
     userId: {
       type: String,
       required: [true, "User ID is required"],
