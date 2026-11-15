@@ -1,0 +1,196 @@
+name: Release Gates & CI Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - "fix/**"
+      - "audit/**"
+  pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-release-gate:
+    name: Backend Release Gate (Tests, Schema & Migrations)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: pantrypal_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      mongodb:
+        image: mongo:6
+        ports:
+          - 27017:27017
+    env:
+      NODE_ENV: test
+      JWT_SECRET: ci-test-jwt-secret-key-1234567890
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/pantrypal_test?schema=public
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/pantrypal_test?schema=public
+      MONGO_TEST_URI: mongodb://localhost:27017/pantrypal_test
+      PORT: 3000
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install Backend Dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Validate Prisma Schema
+        working-directory: backend
+        run: npx prisma validate
+
+      - name: Apply Database Migrations to Test DB
+        working-directory: backend
+        run: npx prisma migrate deploy
+
+      - name: Verify Database Migration Status
+        working-directory: backend
+        run: npx prisma migrate status
+
+      - name: Run Backend Integration & Unit Test Suite
+        working-directory: backend
+        run: npm test
+
+      - name: Production Dependency Installation Smoke Test
+        working-directory: backend
+        run: |
+          mkdir -p /tmp/prod-smoke
+          cp package.json package-lock.json /tmp/prod-smoke/
+          cd /tmp/prod-smoke
+          npm ci --omit=dev
+          ./node_modules/.bin/tsx --version
+          ./node_modules/.bin/prisma --version
+          rm -rf /tmp/prod-smoke
+
+  frontend-release-gate:
+    name: Frontend Release Gate (Component Tests & Build)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Frontend Dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run Frontend Component & Unit Tests
+        working-directory: frontend
+        run: npm test
+
+      - name: Verify Frontend Production Build
+        working-directory: frontend
+        run: npm run build
+
+  e2e-release-gate:
+    name: End-to-End Release Gate (Playwright)
+    runs-on: ubuntu-latest
+    needs: [backend-release-gate, frontend-release-gate]
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: pantrypal_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      mongodb:
+        image: mongo:6
+        ports:
+          - 27017:27017
+    env:
+      NODE_ENV: test
+      JWT_SECRET: ci-test-jwt-secret-key-1234567890
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/pantrypal_test?schema=public
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/pantrypal_test?schema=public
+      MONGO_TEST_URI: mongodb://localhost:27017/pantrypal_test
+      PORT: 3000
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Backend Dependencies & Migrate
+        working-directory: backend
+        run: |
+          npm ci
+          npx prisma generate
+          npx prisma migrate deploy
+
+      - name: Install Frontend Dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Start Backend Server
+        working-directory: backend
+        run: |
+          npx tsx src/server.js &
+          for i in {1..30}; do
+            if curl -s http://localhost:3000/api/v1/health | grep -q "healthy"; then
+              echo "Backend is healthy and ready!"
+              break
+            fi
+            echo "Waiting for backend..."
+            sleep 1
+          done
+
+      - name: Start Frontend Preview Server
+        working-directory: frontend
+        run: |
+          npm run build
+          npx vite preview --port 5173 --host &
+          for i in {1..30}; do
+            if curl -s http://localhost:5173 | grep -q "<html"; then
+              echo "Frontend preview is ready!"
+              break
+            fi
+            echo "Waiting for frontend..."
+            sleep 1
+          done
+
+      - name: Run Playwright E2E Tests
+        working-directory: frontend
+        run: npx playwright test
