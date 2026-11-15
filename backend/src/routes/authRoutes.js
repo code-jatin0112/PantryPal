@@ -9,6 +9,7 @@ import {
   updateProfile,
   changePassword,
   deleteAccount,
+  retryDeletion,
   exportData,
 } from "../controllers/authController.js";
 
@@ -102,6 +103,12 @@ router.delete(
   deleteAccountValidation,
   handleValidationErrors,
   deleteAccount
+);
+
+router.post(
+  "/account/retry-deletion",
+  sensitiveLimiter,
+  retryDeletion
 );
 
 router.delete(

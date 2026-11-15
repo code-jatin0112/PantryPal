@@ -13,6 +13,7 @@ export const AUTH = {
   PROFILE:         '/auth/profile',
   CHANGE_PASSWORD: '/auth/change-password',
   DELETE_ACCOUNT:  '/auth/account',
+  RETRY_DELETION:  '/auth/account/retry-deletion',
   EXPORT:          '/auth/export',
 };
 

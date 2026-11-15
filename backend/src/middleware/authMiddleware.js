@@ -51,15 +51,22 @@ export const authenticate = async (req, res, next) => {
       },
     });
 
-    const isDeleteRetry =
+    const isDeletionStatus =
       user &&
-      user.deletionStatus === "PENDING_DELETION" &&
-      req.method === "DELETE" &&
-      (req.path === "/account" ||
-        req.path === "/me" ||
-        req.baseUrl + req.path === "/api/v1/auth/account");
+      (user.deletionStatus === "PENDING_DELETION" ||
+        user.deletionStatus === "DELETION_FAILED");
 
-    if (!user || !user.isActive || user.deletionStatus === "PENDING_DELETION") {
+    const isDeleteRetry =
+      isDeletionStatus &&
+      ((req.method === "DELETE" &&
+        (req.path === "/account" ||
+          req.path === "/me" ||
+          req.baseUrl + req.path === "/api/v1/auth/account")) ||
+        (req.method === "POST" &&
+          (req.path === "/account/retry-deletion" ||
+            req.baseUrl + req.path === "/api/v1/auth/account/retry-deletion")));
+
+    if (!user || !user.isActive || isDeletionStatus) {
       if (!isDeleteRetry) {
         return next(
           new AppError(

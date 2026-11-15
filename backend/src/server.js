@@ -2,11 +2,20 @@ import "dotenv/config";
 import app from "./app.js";
 import prisma from "./config/database.js";
 import { connectMongo, disconnectMongo } from "./config/mongo.js";
+import { reconcilePendingAccountDeletions } from "./services/authService.js";
 
 const PORT = process.env.PORT || 3000;
 
 // Initialize NoSQL connection
 await connectMongo();
+
+// Durable Deletion Reconciliation: Recover any pending accounts across restarts
+await reconcilePendingAccountDeletions().catch((err) =>
+  console.warn("Initial deletion reconciliation skipped:", err.message)
+);
+
+// Schedule periodic reconciliation every 5 minutes
+setInterval(reconcilePendingAccountDeletions, 5 * 60 * 1000).unref();
 
 const server = app.listen(PORT, () => {
   console.log(`PantryPal backend running on port ${PORT}`);

@@ -43,7 +43,7 @@ export const loginUser = async ({ email, password }) => {
     where: { email },
   });
 
-  if (!user || !user.isActive) {
+  if (!user) {
     throw new AppError(
       "Invalid email or password",
       401,
@@ -54,6 +54,24 @@ export const loginUser = async ({ email, password }) => {
   const passwordMatches = await comparePassword(password, user.password);
 
   if (!passwordMatches) {
+    throw new AppError(
+      "Invalid email or password",
+      401,
+      "INVALID_CREDENTIALS"
+    );
+  }
+
+  if (!user.isActive) {
+    if (
+      user.deletionStatus === "PENDING_DELETION" ||
+      user.deletionStatus === "DELETION_FAILED"
+    ) {
+      throw new AppError(
+        "This account is scheduled for deletion, but background data cleanup is still pending. You may retry finalization.",
+        403,
+        "ACCOUNT_PENDING_DELETION"
+      );
+    }
     throw new AppError(
       "Invalid email or password",
       401,
@@ -220,7 +238,12 @@ export const deleteUserAccount = async ({ userId, password }) => {
     where: { id: userId },
   });
 
-  if (!user || (!user.isActive && user.deletionStatus !== "PENDING_DELETION")) {
+  if (
+    !user ||
+    (!user.isActive &&
+      user.deletionStatus !== "PENDING_DELETION" &&
+      user.deletionStatus !== "DELETION_FAILED")
+  ) {
     throw new AppError(
       "User account is not available",
       401,
@@ -228,16 +251,14 @@ export const deleteUserAccount = async ({ userId, password }) => {
     );
   }
 
-  // Verify password if not already locked in PENDING_DELETION
-  if (user.deletionStatus !== "PENDING_DELETION") {
-    const passwordMatches = await comparePassword(password, user.password);
-    if (!passwordMatches) {
-      throw new AppError(
-        "Incorrect password. Verification failed.",
-        400,
-        "INVALID_PASSWORD"
-      );
-    }
+  // Always verify password to prevent unauthorized deletion
+  const passwordMatches = await comparePassword(password, user.password);
+  if (!passwordMatches) {
+    throw new AppError(
+      "Incorrect password. Verification failed.",
+      400,
+      "INVALID_PASSWORD"
+    );
   }
 
   // 1. Immediately transition to durable PENDING_DELETION state
@@ -272,6 +293,10 @@ export const deleteUserAccount = async ({ userId, password }) => {
         "Failed to delete MongoDB AI logs during account deletion:",
         mongoErr.message
       );
+      await prisma.user.update({
+        where: { id: userId },
+        data: { deletionStatus: "DELETION_FAILED" },
+      }).catch(() => {});
       throw new AppError(
         "Account entered pending deletion, but NoSQL telemetry cleanup failed. Please retry to complete deletion.",
         502,
@@ -290,6 +315,173 @@ export const deleteUserAccount = async ({ userId, password }) => {
   return {
     message: "Account and associated data deleted successfully",
   };
+};
+
+/**
+ * Robust deletion retry and reconciliation path.
+ * Survives page reload, token loss, and process restart by authenticating credentials.
+ */
+export const retryAccountDeletion = async ({ email, password, userId }) => {
+  let user = null;
+  if (userId) {
+    user = await prisma.user.findUnique({ where: { id: userId } });
+  } else if (email) {
+    user = await prisma.user.findUnique({ where: { email } });
+  }
+
+  // Idempotent completion: If account does not exist, full deletion is already achieved
+  if (!user) {
+    return {
+      status: "COMPLETED",
+      message: "Account has already been completely deleted.",
+    };
+  }
+
+  if (!password) {
+    throw new AppError(
+      "Password is required to verify identity for deletion recovery.",
+      400,
+      "INVALID_PASSWORD"
+    );
+  }
+
+  // Mandatory identity verification
+  const passwordMatches = await comparePassword(password, user.password);
+  if (!passwordMatches) {
+    throw new AppError(
+      "Invalid credentials. Verification failed.",
+      401,
+      "INVALID_CREDENTIALS"
+    );
+  }
+
+  // Ensure user is marked PENDING_DELETION and locked
+  if (user.deletionStatus !== "PENDING_DELETION") {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        isActive: false,
+        deletionStatus: "PENDING_DELETION",
+        tokenVersion: { increment: 1 },
+      },
+    });
+  }
+
+  // Attempt NoSQL cleanup
+  let mongoSuccess = true;
+  if (process.env.MONGO_URI) {
+    try {
+      const { default: mongoose } = await import("mongoose");
+      const { connectMongo } = await import("../config/mongo.js");
+      if (mongoose.connection.readyState === 0) {
+        await connectMongo();
+      }
+      if (mongoose.connection.readyState === 1) {
+        const { AiInteractionLog } = await import("../models/AiInteractionLog.js");
+        if (AiInteractionLog) {
+          await AiInteractionLog.deleteMany({ userId: user.id });
+        }
+      } else {
+        mongoSuccess = false;
+      }
+    } catch (err) {
+      console.warn("MongoDB retry cleanup failed:", err.message);
+      mongoSuccess = false;
+    }
+  }
+
+  if (!mongoSuccess) {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { deletionStatus: "DELETION_FAILED" },
+    }).catch(() => {});
+
+    throw new AppError(
+      "Telemetry cleanup failed during retry. Account remains locked in deletion state. Please retry or wait for background recovery.",
+      502,
+      "TELEMETRY_CLEANUP_FAILED"
+    );
+  }
+
+  // PostgreSQL transactional cascade deletion
+  await prisma.$transaction(async (tx) => {
+    await tx.user.delete({
+      where: { id: user.id },
+    });
+  });
+
+  return {
+    status: "COMPLETED",
+    message: "Account and associated data deleted successfully",
+  };
+};
+
+/**
+ * Server-side durable scheduled reconciliation.
+ * Automatically recovers pending accounts across process restarts or network outages.
+ */
+export const reconcilePendingAccountDeletions = async () => {
+  const pendingUsers = await prisma.user.findMany({
+    where: {
+      deletionStatus: { in: ["PENDING_DELETION", "DELETION_FAILED"] },
+    },
+    select: {
+      id: true,
+      email: true,
+    },
+  });
+
+  if (pendingUsers.length === 0) {
+    return { reconciled: 0, failed: 0 };
+  }
+
+  console.log(`[Reconciliation] Found ${pendingUsers.length} account(s) pending deletion finalization.`);
+
+  let reconciled = 0;
+  let failed = 0;
+
+  for (const user of pendingUsers) {
+    let mongoSuccess = true;
+    if (process.env.MONGO_URI) {
+      try {
+        const { default: mongoose } = await import("mongoose");
+        const { connectMongo } = await import("../config/mongo.js");
+        if (mongoose.connection.readyState === 0) {
+          await connectMongo();
+        }
+        if (mongoose.connection.readyState === 1) {
+          const { AiInteractionLog } = await import("../models/AiInteractionLog.js");
+          if (AiInteractionLog) {
+            await AiInteractionLog.deleteMany({ userId: user.id });
+          }
+        } else {
+          mongoSuccess = false;
+        }
+      } catch (err) {
+        console.warn(`[Reconciliation] MongoDB cleanup failed for user ${user.id}:`, err.message);
+        mongoSuccess = false;
+      }
+    }
+
+    if (mongoSuccess) {
+      try {
+        await prisma.user.delete({ where: { id: user.id } });
+        console.log(`[Reconciliation] Successfully finalized deletion for user ${user.id}`);
+        reconciled++;
+      } catch (err) {
+        console.error(`[Reconciliation] PostgreSQL deletion failed for user ${user.id}:`, err.message);
+        failed++;
+      }
+    } else {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { deletionStatus: "DELETION_FAILED" },
+      }).catch(() => {});
+      failed++;
+    }
+  }
+
+  return { reconciled, failed };
 };
 
 export const exportUserData = async ({ userId }) => {

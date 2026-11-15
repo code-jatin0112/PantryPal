@@ -44,6 +44,18 @@ export const deleteUserAccount = async ({ password }) => {
 };
 
 /**
+ * Retry or finalize pending account deletion across reloads or logouts
+ * POST /api/v1/auth/account/retry-deletion
+ */
+export const retryAccountDeletion = async ({ email, password }) => {
+  const res = await api.post(AUTH.RETRY_DELETION, {
+    email,
+    password,
+  });
+  return res.data?.data || res.data;
+};
+
+/**
  * Export complete server-persisted user archive
  * GET /api/v1/auth/export
  */
