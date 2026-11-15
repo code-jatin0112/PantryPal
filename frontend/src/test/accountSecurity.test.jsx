@@ -142,6 +142,36 @@ describe('Account Management & Security Frontend Unit Suite (Phase 5)', () => {
         expect(changePasswordSpy).not.toHaveBeenCalled();
       });
     });
+
+    it('updates token in localStorage when changePassword returns a new accessToken', async () => {
+      vi.spyOn(authService, 'changeUserPassword').mockResolvedValue({
+        message: 'Password changed successfully',
+        accessToken: 'newly-issued-session-token-xyz',
+      });
+      const onCloseMock = vi.fn();
+
+      const { container } = render(
+        <ToastProvider>
+          <ChangePasswordModal isOpen={true} onClose={onCloseMock} />
+        </ToastProvider>
+      );
+
+      const currentInput = container.querySelector('input[name="currentPassword"]');
+      const newInput = container.querySelector('input[name="newPassword"]');
+      const confirmInput = container.querySelector('input[name="confirmPassword"]');
+
+      await userEvent.type(currentInput, 'OldSecretPass123!');
+      await userEvent.type(newInput, 'NewSecurePass456!');
+      await userEvent.type(confirmInput, 'NewSecurePass456!');
+
+      const submitBtn = screen.getByRole('button', { name: /Update Password/i });
+      fireEvent.click(submitBtn);
+
+      await waitFor(() => {
+        expect(localStorage.getItem('token')).toBe('newly-issued-session-token-xyz');
+        expect(onCloseMock).toHaveBeenCalled();
+      });
+    });
   });
 
   // ── 3. Delete Account Modal ────────────────────────────────
@@ -231,6 +261,49 @@ describe('Account Management & Security Frontend Unit Suite (Phase 5)', () => {
       );
 
       // Switch to Account tab
+      const accountTab = screen.getByRole('button', { name: /Account/i });
+      fireEvent.click(accountTab);
+
+      const exportBtn = await screen.findByRole('button', { name: /Export JSON/i });
+      fireEvent.click(exportBtn);
+
+      await waitFor(() => {
+        expect(exportSpy).toHaveBeenCalled();
+        expect(createObjectURLMock).toHaveBeenCalled();
+      });
+    });
+
+    it('handles partial export when AI history is unavailable and warns the user', async () => {
+      const exportSpy = vi.spyOn(authService, 'exportUserData').mockResolvedValue({
+        version: '1.1.0',
+        completeness: 'partial',
+        dataSources: { relational: 'postgresql', telemetry: 'unavailable' },
+        account: { id: 'u1', name: 'Chef Test', email: 'test@test.com' },
+        pantries: [],
+        recipes: [],
+      });
+
+      const createObjectURLMock = vi.fn().mockReturnValue('blob:mock-url');
+      const revokeObjectURLMock = vi.fn();
+      global.URL.createObjectURL = createObjectURLMock;
+      global.URL.revokeObjectURL = revokeObjectURLMock;
+
+      vi.spyOn(preferenceService, 'getUserPreferences').mockResolvedValue({
+        dietaryPreferences: ['Keto'],
+        allergies: [],
+        dislikedIngredients: [],
+      });
+
+      render(
+        <BrowserRouter>
+          <ToastProvider>
+            <AuthProvider>
+              <Settings />
+            </AuthProvider>
+          </ToastProvider>
+        </BrowserRouter>
+      );
+
       const accountTab = screen.getByRole('button', { name: /Account/i });
       fireEvent.click(accountTab);
 

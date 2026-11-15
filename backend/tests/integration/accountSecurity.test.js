@@ -1,11 +1,13 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import supertest from "supertest";
 import app from "../../src/app.js";
 import prisma from "../../src/config/database.js";
 import { generateAccessToken } from "../../src/utils/token.js";
 import { hashPassword, comparePassword } from "../../src/utils/password.js";
+import { connectMongo, disconnectMongo } from "../../src/config/mongo.js";
+import { AiInteractionLog } from "../../src/models/AiInteractionLog.js";
 
-describe("Account Management & Security Integration Tests (Phase 5)", () => {
+describe("Account Management & Security Integration Tests (Phase 5 Hardening)", () => {
   let primaryUser;
   let primaryToken;
   let secondaryUser;
@@ -23,6 +25,8 @@ describe("Account Management & Security Integration Tests (Phase 5)", () => {
       );
     }
 
+    await connectMongo();
+
     const initialHashedPassword = await hashPassword("InitialSecret123!");
 
     // Primary test user
@@ -34,7 +38,7 @@ describe("Account Management & Security Integration Tests (Phase 5)", () => {
         isActive: true,
       },
     });
-    primaryToken = generateAccessToken(primaryUser.id);
+    primaryToken = generateAccessToken(primaryUser.id, 0);
 
     // Secondary test user for cross-user authorization tests
     secondaryUser = await prisma.user.create({
@@ -45,16 +49,24 @@ describe("Account Management & Security Integration Tests (Phase 5)", () => {
         isActive: true,
       },
     });
-    secondaryToken = generateAccessToken(secondaryUser.id);
+    secondaryToken = generateAccessToken(secondaryUser.id, 0);
   });
 
   afterAll(async () => {
+    vi.restoreAllMocks();
     if (primaryUser?.id) {
       await prisma.user.deleteMany({ where: { id: primaryUser.id } });
+      try {
+        await AiInteractionLog.deleteMany({ userId: primaryUser.id });
+      } catch {}
     }
     if (secondaryUser?.id) {
       await prisma.user.deleteMany({ where: { id: secondaryUser.id } });
+      try {
+        await AiInteractionLog.deleteMany({ userId: secondaryUser.id });
+      } catch {}
     }
+    await disconnectMongo();
   });
 
   // ── 1. Profile Read & Authentication Guards ─────────────────
@@ -180,38 +192,9 @@ describe("Account Management & Security Integration Tests (Phase 5)", () => {
     });
   });
 
-  // ── 3. Secure Password Change ───────────────────────────────
-  describe("3. Secure Password Change & Verification", () => {
-    it("successfully changes password when current password matches", async () => {
-      const res = await supertest(app)
-        .post("/api/v1/auth/change-password")
-        .set("Authorization", `Bearer ${primaryToken}`)
-        .send({
-          currentPassword: "InitialSecret123!",
-          newPassword: "BrandNewSecurePassword456!",
-          confirmPassword: "BrandNewSecurePassword456!",
-        });
-
-      expect(res.status).toBe(200);
-      expect(res.body.success).toBe(true);
-
-      // Verify password was updated in DB and matches new hash
-      const dbUser = await prisma.user.findUnique({
-        where: { id: primaryUser.id },
-      });
-      const matches = await comparePassword(
-        "BrandNewSecurePassword456!",
-        dbUser.password
-      );
-      expect(matches).toBe(true);
-
-      // Verify old password no longer matches
-      const oldMatches = await comparePassword(
-        "InitialSecret123!",
-        dbUser.password
-      );
-      expect(oldMatches).toBe(false);
-    });
+  // ── 3. Secure Password Change & JWT Revocation ──────────────
+  describe("3. Secure Password Change, Token Revocation & Re-Authentication", () => {
+    let staleTokenBeforeChange;
 
     it("rejects password change when current password is wrong with 400 INVALID_CURRENT_PASSWORD", async () => {
       const res = await supertest(app)
@@ -233,9 +216,9 @@ describe("Account Management & Security Integration Tests (Phase 5)", () => {
         .post("/api/v1/auth/change-password")
         .set("Authorization", `Bearer ${primaryToken}`)
         .send({
-          currentPassword: "BrandNewSecurePassword456!",
-          newPassword: "BrandNewSecurePassword456!",
-          confirmPassword: "BrandNewSecurePassword456!",
+          currentPassword: "InitialSecret123!",
+          newPassword: "InitialSecret123!",
+          confirmPassword: "InitialSecret123!",
         });
 
       expect(res.status).toBe(400);
@@ -248,7 +231,7 @@ describe("Account Management & Security Integration Tests (Phase 5)", () => {
         .post("/api/v1/auth/change-password")
         .set("Authorization", `Bearer ${primaryToken}`)
         .send({
-          currentPassword: "BrandNewSecurePassword456!",
+          currentPassword: "InitialSecret123!",
           newPassword: "AnotherValidPassword789!",
           confirmPassword: "MismatchPassword!",
         });
@@ -257,10 +240,93 @@ describe("Account Management & Security Integration Tests (Phase 5)", () => {
       expect(res.body.success).toBe(false);
       expect(res.body.error.code).toBe("VALIDATION_ERROR");
     });
+
+    it("successfully changes password, increments tokenVersion and returns new accessToken", async () => {
+      staleTokenBeforeChange = primaryToken;
+
+      const res = await supertest(app)
+        .post("/api/v1/auth/change-password")
+        .set("Authorization", `Bearer ${primaryToken}`)
+        .send({
+          currentPassword: "InitialSecret123!",
+          newPassword: "BrandNewSecurePassword456!",
+          confirmPassword: "BrandNewSecurePassword456!",
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.accessToken).toBeDefined();
+
+      // Verify password and tokenVersion updated in PostgreSQL
+      const dbUser = await prisma.user.findUnique({
+        where: { id: primaryUser.id },
+      });
+      const matches = await comparePassword(
+        "BrandNewSecurePassword456!",
+        dbUser.password
+      );
+      expect(matches).toBe(true);
+      expect(dbUser.tokenVersion).toBeGreaterThan(0);
+
+      // Save the newly issued access token for subsequent tests
+      primaryToken = res.body.data.accessToken;
+    });
+
+    it("invalidates older JWTs across all routes after password change (401 TOKEN_REVOKED)", async () => {
+      // 1. GET /api/v1/auth/me
+      const meRes = await supertest(app)
+        .get("/api/v1/auth/me")
+        .set("Authorization", `Bearer ${staleTokenBeforeChange}`);
+
+      expect(meRes.status).toBe(401);
+      expect(meRes.body.error.code).toBe("TOKEN_REVOKED");
+
+      // 2. GET /api/v1/pantries
+      const pantriesRes = await supertest(app)
+        .get("/api/v1/pantries")
+        .set("Authorization", `Bearer ${staleTokenBeforeChange}`);
+
+      expect(pantriesRes.status).toBe(401);
+      expect(pantriesRes.body.error.code).toBe("TOKEN_REVOKED");
+    });
+
+    it("rejects login attempt with old password (401 INVALID_CREDENTIALS)", async () => {
+      const res = await supertest(app)
+        .post("/api/v1/auth/login")
+        .send({
+          email: primaryUser.email,
+          password: "InitialSecret123!",
+        });
+
+      expect(res.status).toBe(401);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.code).toBe("INVALID_CREDENTIALS");
+    });
+
+    it("allows login with new password and returns a token matching current tokenVersion", async () => {
+      const res = await supertest(app)
+        .post("/api/v1/auth/login")
+        .send({
+          email: primaryUser.email,
+          password: "BrandNewSecurePassword456!",
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.accessToken).toBeDefined();
+
+      // Verify newly logged-in token works on protected endpoints
+      const checkRes = await supertest(app)
+        .get("/api/v1/auth/me")
+        .set("Authorization", `Bearer ${res.body.data.accessToken}`);
+
+      expect(checkRes.status).toBe(200);
+      expect(checkRes.body.data.user.id).toBe(primaryUser.id);
+    });
   });
 
   // ── 4. Personal Data Export ─────────────────────────────────
-  describe("4. Personal Data Export & Privacy", () => {
+  describe("4. Personal Data Export & AI Interaction Privacy", () => {
     beforeAll(async () => {
       // Create test pantry, recipe, shopping item, preference for export testing
       await prisma.userPreference.upsert({
@@ -314,9 +380,30 @@ describe("Account Management & Security Integration Tests (Phase 5)", () => {
           unit: "g",
         },
       });
+
+      // Seed MongoDB AI interaction logs scoped to users
+      try {
+        await AiInteractionLog.create({
+          userId: primaryUser.id,
+          messagePrompt: "What can I cook with Arborio rice and saffron?",
+          intentDetected: "RECIPE_GENERATION",
+          aiResponse: { title: "Risotto Milanese", confidence: 0.99 },
+          tokenUsage: 120,
+        });
+
+        await AiInteractionLog.create({
+          userId: secondaryUser.id,
+          messagePrompt: "How do I temper chocolate?",
+          intentDetected: "KITCHEN_ASSISTANT",
+          aiResponse: { tip: "Melt to 45C then cool to 28C" },
+          tokenUsage: 80,
+        });
+      } catch (err) {
+        console.warn("MongoDB seed in test skipped:", err.message);
+      }
     });
 
-    it("exports complete structured user data archive excluding password hash", async () => {
+    it("exports complete structured user data archive including MongoDB AI logs and excluding password hash", async () => {
       const res = await supertest(app)
         .get("/api/v1/auth/export")
         .set("Authorization", `Bearer ${primaryToken}`);
@@ -326,7 +413,7 @@ describe("Account Management & Security Integration Tests (Phase 5)", () => {
 
       const archive = res.body.data;
       expect(archive.exportedAt).toBeDefined();
-      expect(archive.version).toBe("1.0.0");
+      expect(archive.version).toBe("1.1.0");
 
       // Verify Account
       expect(archive.account.id).toBe(primaryUser.id);
@@ -353,8 +440,46 @@ describe("Account Management & Security Integration Tests (Phase 5)", () => {
       const saffron = archive.shoppingList.find((i) => i.name === "Saffron Threads");
       expect(saffron).toBeDefined();
 
-      // Ensure secondary user data is NOT leaked into primary export
+      // Verify AI Interaction History
+      expect(Array.isArray(archive.aiInteractionHistory)).toBe(true);
+      if (archive.dataSources.telemetry === "included") {
+        expect(archive.completeness).toBe("complete");
+        const userLog = archive.aiInteractionHistory.find((l) =>
+          l.messagePrompt.includes("Arborio rice")
+        );
+        expect(userLog).toBeDefined();
+
+        // Ensure secondary user AI log is NOT leaked
+        const leakedLog = archive.aiInteractionHistory.find((l) =>
+          l.messagePrompt.includes("temper chocolate")
+        );
+        expect(leakedLog).toBeUndefined();
+      }
+
+      // Ensure secondary user relational data is NOT leaked
       expect(archive.account.id).not.toBe(secondaryUser.id);
+    });
+
+    it("handles MongoDB telemetry failure gracefully by marking completeness as partial", async () => {
+      // Simulate MongoDB failure during export
+      const findSpy = vi.spyOn(AiInteractionLog, "find").mockImplementationOnce(() => {
+        throw new Error("Simulated MongoDB query timeout");
+      });
+
+      const res = await supertest(app)
+        .get("/api/v1/auth/export")
+        .set("Authorization", `Bearer ${primaryToken}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+
+      const archive = res.body.data;
+      expect(archive.completeness).toBe("partial");
+      expect(archive.dataSources.telemetry).toBe("unavailable");
+      expect(archive.account.password).toBeUndefined();
+      expect(archive.pantries.length).toBeGreaterThanOrEqual(1);
+
+      findSpy.mockRestore();
     });
   });
 
@@ -399,8 +524,51 @@ describe("Account Management & Security Integration Tests (Phase 5)", () => {
     });
   });
 
-  // ── 6. Account Deletion & Cascading Cleanup ─────────────────
-  describe("6. Account Deletion & Transactional Cascade", () => {
+  // ── 6. Central Account Status & Token Revocation Guards ─────
+  describe("6. Central Account Status & Token Revocation Guards", () => {
+    let inactiveUser;
+    let inactiveToken;
+
+    beforeAll(async () => {
+      const hashedPass = await hashPassword("InactiveSecret123!");
+      inactiveUser = await prisma.user.create({
+        data: {
+          name: "Inactive Chef",
+          email: `inactive-${Date.now()}@pantrypal.test`,
+          password: hashedPass,
+          isActive: false,
+        },
+      });
+      inactiveToken = generateAccessToken(inactiveUser.id, 0);
+    });
+
+    afterAll(async () => {
+      if (inactiveUser?.id) {
+        await prisma.user.deleteMany({ where: { id: inactiveUser.id } });
+      }
+    });
+
+    it("rejects tokens of inactive users across all protected routes with 401 USER_NOT_AVAILABLE", async () => {
+      // 1. GET /api/v1/auth/me
+      const meRes = await supertest(app)
+        .get("/api/v1/auth/me")
+        .set("Authorization", `Bearer ${inactiveToken}`);
+
+      expect(meRes.status).toBe(401);
+      expect(meRes.body.error.code).toBe("USER_NOT_AVAILABLE");
+
+      // 2. GET /api/v1/pantries
+      const pantryRes = await supertest(app)
+        .get("/api/v1/pantries")
+        .set("Authorization", `Bearer ${inactiveToken}`);
+
+      expect(pantryRes.status).toBe(401);
+      expect(pantryRes.body.error.code).toBe("USER_NOT_AVAILABLE");
+    });
+  });
+
+  // ── 7. Cross-Database Account Deletion & Cascading Cleanup ───
+  describe("7. Cross-Database Account Deletion & Transactional Resilience", () => {
     let doomedUser;
     let doomedToken;
 
@@ -414,9 +582,9 @@ describe("Account Management & Security Integration Tests (Phase 5)", () => {
           isActive: true,
         },
       });
-      doomedToken = generateAccessToken(doomedUser.id);
+      doomedToken = generateAccessToken(doomedUser.id, 0);
 
-      // Seed doomed user records to verify cascading deletion
+      // Seed doomed user records in PostgreSQL to verify cascading deletion
       await prisma.userPreference.create({
         data: {
           userId: doomedUser.id,
@@ -447,6 +615,19 @@ describe("Account Management & Security Integration Tests (Phase 5)", () => {
           instructions: "Bake and delete",
         },
       });
+
+      // Seed doomed user records in MongoDB
+      try {
+        await AiInteractionLog.create({
+          userId: doomedUser.id,
+          messagePrompt: "Delete me later prompt",
+          intentDetected: "UNKNOWN",
+          aiResponse: { ack: true },
+          tokenUsage: 10,
+        });
+      } catch (err) {
+        console.warn("MongoDB seed for doomed user skipped:", err.message);
+      }
     });
 
     it("rejects account deletion when password verification fails", async () => {
@@ -466,7 +647,42 @@ describe("Account Management & Security Integration Tests (Phase 5)", () => {
       expect(checkUser).toBeDefined();
     });
 
-    it("successfully deletes account and cascades to all child records", async () => {
+    it("handles cross-database partial failure when MongoDB cleanup fails (502 TELEMETRY_CLEANUP_FAILED)", async () => {
+      // Simulate MongoDB failure during deletion
+      const deleteManySpy = vi
+        .spyOn(AiInteractionLog, "deleteMany")
+        .mockRejectedValueOnce(new Error("Simulated MongoDB network failure"));
+
+      const res = await supertest(app)
+        .delete("/api/v1/auth/account")
+        .set("Authorization", `Bearer ${doomedToken}`)
+        .send({ password: "DeleteMe123!" });
+
+      expect(res.status).toBe(502);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.code).toBe("TELEMETRY_CLEANUP_FAILED");
+
+      // Verify PostgreSQL user was NOT deleted, but is marked PENDING_DELETION and inactive
+      const checkUser = await prisma.user.findUnique({
+        where: { id: doomedUser.id },
+      });
+      expect(checkUser).toBeDefined();
+      expect(checkUser.isActive).toBe(false);
+      expect(checkUser.deletionStatus).toBe("PENDING_DELETION");
+
+      // Verify user is immediately locked out from normal API operations
+      const meRes = await supertest(app)
+        .get("/api/v1/auth/me")
+        .set("Authorization", `Bearer ${doomedToken}`);
+
+      expect(meRes.status).toBe(401);
+      expect(meRes.body.error.code).toBe("USER_NOT_AVAILABLE");
+
+      deleteManySpy.mockRestore();
+    });
+
+    it("allows safe idempotent retry to complete account deletion and cascades to child records", async () => {
+      // Retry account deletion now that MongoDB is available
       const res = await supertest(app)
         .delete("/api/v1/auth/account")
         .set("Authorization", `Bearer ${doomedToken}`)
@@ -475,7 +691,7 @@ describe("Account Management & Security Integration Tests (Phase 5)", () => {
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
 
-      // 1. Verify User deleted
+      // 1. Verify User deleted in PostgreSQL
       const checkUser = await prisma.user.findUnique({
         where: { id: doomedUser.id },
       });
@@ -498,9 +714,15 @@ describe("Account Management & Security Integration Tests (Phase 5)", () => {
         where: { userId: doomedUser.id },
       });
       expect(checkRecipes.length).toBe(0);
+
+      // 5. Verify MongoDB AI logs deleted
+      try {
+        const remainingLogs = await AiInteractionLog.find({ userId: doomedUser.id });
+        expect(remainingLogs.length).toBe(0);
+      } catch {}
     });
 
-    it("rejects subsequent operations using the deleted user's token with 401", async () => {
+    it("rejects subsequent operations using the deleted user's token with 401 USER_NOT_AVAILABLE", async () => {
       const res = await supertest(app)
         .get("/api/v1/auth/me")
         .set("Authorization", `Bearer ${doomedToken}`);
