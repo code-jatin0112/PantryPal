@@ -11,7 +11,9 @@ export const connectMongo = async () => {
 
     mongoose.set("strictQuery", false);
 
-    const connection = await mongoose.connect(mongoUri);
+    const connection = await mongoose.connect(mongoUri, {
+      serverSelectionTimeoutMS: 5000,
+    });
 
     console.log(`✅ MongoDB connected: ${connection.connection.host}`);
     return connection;

@@ -26,7 +26,7 @@ export const registerUser = async ({ name, email, password }) => {
     },
   });
 
-  const accessToken = generateAccessToken(user.id);
+  const accessToken = generateAccessToken(user.id, user.tokenVersion ?? 0);
 
   return {
     user: {
@@ -61,7 +61,7 @@ export const loginUser = async ({ email, password }) => {
     );
   }
 
-  const accessToken = generateAccessToken(user.id);
+  const accessToken = generateAccessToken(user.id, user.tokenVersion ?? 0);
 
   return {
     user: {
@@ -163,7 +163,7 @@ export const changeUserPassword = async ({
     where: { id: userId },
   });
 
-  if (!user || !user.isActive) {
+  if (!user || !user.isActive || user.deletionStatus === "PENDING_DELETION") {
     throw new AppError(
       "User account is not available",
       401,
@@ -190,13 +190,28 @@ export const changeUserPassword = async ({
 
   const hashedPassword = await hashPassword(newPassword);
 
-  await prisma.user.update({
+  // Increment tokenVersion to invalidate existing tokens across all sessions/devices
+  const updatedUser = await prisma.user.update({
     where: { id: userId },
-    data: { password: hashedPassword },
+    data: {
+      password: hashedPassword,
+      tokenVersion: { increment: 1 },
+    },
+    select: {
+      id: true,
+      tokenVersion: true,
+    },
   });
+
+  // Issue a fresh access token with the incremented tokenVersion for the current session
+  const accessToken = generateAccessToken(
+    updatedUser.id,
+    updatedUser.tokenVersion
+  );
 
   return {
     message: "Password changed successfully",
+    accessToken,
   };
 };
 
@@ -205,7 +220,7 @@ export const deleteUserAccount = async ({ userId, password }) => {
     where: { id: userId },
   });
 
-  if (!user || !user.isActive) {
+  if (!user || (!user.isActive && user.deletionStatus !== "PENDING_DELETION")) {
     throw new AppError(
       "User account is not available",
       401,
@@ -213,29 +228,64 @@ export const deleteUserAccount = async ({ userId, password }) => {
     );
   }
 
-  const passwordMatches = await comparePassword(password, user.password);
-  if (!passwordMatches) {
-    throw new AppError(
-      "Incorrect password. Verification failed.",
-      400,
-      "INVALID_PASSWORD"
-    );
+  // Verify password if not already locked in PENDING_DELETION
+  if (user.deletionStatus !== "PENDING_DELETION") {
+    const passwordMatches = await comparePassword(password, user.password);
+    if (!passwordMatches) {
+      throw new AppError(
+        "Incorrect password. Verification failed.",
+        400,
+        "INVALID_PASSWORD"
+      );
+    }
   }
 
+  // 1. Immediately transition to durable PENDING_DELETION state
+  // This locks out the account and revokes active sessions across all routes
+  await prisma.user.update({
+    where: { id: userId },
+    data: {
+      isActive: false,
+      deletionStatus: "PENDING_DELETION",
+      tokenVersion: { increment: 1 },
+    },
+  });
+
+  // 2. Clean up NoSQL telemetry (MongoDB AI interaction logs)
+  if (process.env.MONGO_URI) {
+    try {
+      const { default: mongoose } = await import("mongoose");
+      const { connectMongo } = await import("../config/mongo.js");
+      if (mongoose.connection.readyState === 0) {
+        await connectMongo();
+      }
+      if (mongoose.connection.readyState === 1) {
+        const { AiInteractionLog } = await import("../models/AiInteractionLog.js");
+        if (AiInteractionLog) {
+          await AiInteractionLog.deleteMany({ userId });
+        }
+      } else {
+        throw new Error("MongoDB connection unavailable");
+      }
+    } catch (mongoErr) {
+      console.error(
+        "Failed to delete MongoDB AI logs during account deletion:",
+        mongoErr.message
+      );
+      throw new AppError(
+        "Account entered pending deletion, but NoSQL telemetry cleanup failed. Please retry to complete deletion.",
+        502,
+        "TELEMETRY_CLEANUP_FAILED"
+      );
+    }
+  }
+
+  // 3. PostgreSQL transactional cascade deletion
   await prisma.$transaction(async (tx) => {
     await tx.user.delete({
       where: { id: userId },
     });
   });
-
-  try {
-    const { AiInteractionLog } = await import("../models/AiInteractionLog.js");
-    if (AiInteractionLog) {
-      await AiInteractionLog.deleteMany({ userId });
-    }
-  } catch (mongoErr) {
-    // Non-blocking if mongo is not active
-  }
 
   return {
     message: "Account and associated data deleted successfully",
