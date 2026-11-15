@@ -17,12 +17,12 @@ All verification runs were executed against authorized local test databases (`pa
 
 | Test Suite | Files / Specs | Passed | Failed | Skipped | Duration | Execution Mode |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Backend Integration Suite** | 19 files | **270** | **0** | **0** | 35.01s | Vitest (`--fileParallelism=false`) |
-| **Frontend Component Suite** | 13 files | **77** | **0** | **0** | 5.44s | Vitest (`--run`) |
+| **Backend Integration Suite** | 19 files | **273** | **0** | **0** | 37.27s | Vitest (`--fileParallelism=false`) |
+| **Frontend Component Suite** | 13 files | **78** | **0** | **0** | 5.32s | Vitest (`--run`) |
 | **Playwright End-to-End Suite** | 7 specs | **9** | **0** | **0** | 5.50s | Playwright Browser (Chromium) |
 | **Prisma Schema Validation** | 1 schema | **Valid** | **0** | **0** | 0.08s | `prisma validate` |
 | **Database Migrations** | 16 migrations | **Up-to-date**| **0** | **0** | 0.72s | `prisma migrate status` (dev & test) |
-| **Production Runtime Smoke Test** | Clean Install | **Success** | **0** | **0** | 5.20s | `npm ci --omit=dev` (`tsx` & `prisma`) |
+| **Production Runtime Smoke Test** | Clean Install | **Success** | **0** | **0** | 4.00s | `npm ci --omit=dev` (`tsx` & `prisma`) |
 | **Frontend Production Build** | Vite Client | **Success** | **0** | **0** | 0.35s | `vite build` |
 
 ---
@@ -236,19 +236,22 @@ All verification runs were executed against authorized local test databases (`pa
 ## 5. Prioritized Remediation Roadmap
 
 ### Priority 1: Pre-Release Blockers (All Resolved in Phase 6)
-1. **Fix `tsx` Production Dependency** — **RESOLVED**:
+1. **Fix `tsx` Production Dependency & CI Lockfile** — **RESOLVED**:
    - Moved `"tsx"` to `"dependencies"` in `backend/package.json`.
-   - Verified clean `npm ci --omit=dev` and startup.
-2. **Purge `UnstructuredRecipe` on Account Deletion & Export** — **RESOLVED**:
+   - Regenerated lockfile with consistent `gcp-metadata@7.0.1` nested peer-dependency resolution.
+   - Updated CI pipeline to Node 22 matching Docker, added `npx prisma generate` before test runs, and serialized Vitest test database execution with `--fileParallelism=false`.
+   - Verified clean `npm ci` and `npm ci --omit=dev` with verified runtime binaries.
+2. **Purge `UnstructuredRecipe` on Account Deletion & Export with Race Condition Fencing** — **RESOLVED**:
    - Added `UnstructuredRecipe.deleteMany({ userId })` across `deleteUserAccount`, `retryAccountDeletion`, and `reconcilePendingAccountDeletions`.
    - Added `unstructuredRecipes` documents to `exportUserData` output.
+   - Guarded in-flight AI recipe and chat generation with database-backed pre-write checks and post-write compensating rollback, ensuring in-flight operations cannot resurrect documents for deleted or pending-deletion users.
 3. **Mount Rate Limiter on Authentication Routes** — **RESOLVED**:
    - Added dedicated `authLimiter` (10 req/15min) to `POST /api/v1/auth/login` and `POST /api/v1/auth/register`.
-4. **Mount Rate Limiter & Upstream Quota Protection on AI Endpoints** — **RESOLVED**:
-   - Added per-user `aiLimiter` (20 req/15min) to `/api/v1/ai/chat`, `/api/v1/ai/recipes/generate`, and `/api/v1/ai/recommendations`.
+4. **Mount Unified Rate Limiter & Upstream Quota Protection on AI Endpoints** — **RESOLVED**:
+   - Implemented single shared `sharedAiLimiter` instance (20 req/15min) across `/api/v1/ai/chat`, `/api/v1/ai/recipes/generate`, and `/api/v1/ai/recommendations` so all AI endpoints decrement the same user quota.
    - Handled upstream Gemini 429 quota errors mapping to HTTP 429 `AI_QUOTA_EXCEEDED`.
 5. **Client-Server AI Timeout Alignment** — **RESOLVED**:
-   - Configured 35s timeout in `frontend/src/services/aiService.js`.
+   - Configured 35s timeout in `frontend/src/services/aiService.js` and `frontend/src/services/aiRecommendationService.js`.
 6. **Error Handler Credential Sanitization** — **RESOLVED**:
    - Redacted database connection credentials in `backend/src/middleware/errorHandler.js`.
 7. **Automated CI/CD Release Gates** — **RESOLVED**:
@@ -271,10 +274,11 @@ All verification runs were executed against authorized local test databases (`pa
 
 #### Rationale:
 All validated **Priority 1 Pre-Release Blockers** identified in the audit have been fully resolved, verified with dedicated integration tests, and guarded with automated GitHub Actions CI release gates:
-1. Production packaging is verified: `tsx` and `prisma` are available under `npm ci --omit=dev`, and `npm start` boots Express cleanly with HTTP 200 `/api/v1/health`.
+1. Production packaging is verified: `tsx` and `prisma` are available under `npm ci --omit=dev`, lockfile is strictly synchronized, and `npm start` boots Express cleanly with HTTP 200 `/api/v1/health`.
 2. Cross-database data erasure is complete: `UnstructuredRecipe` documents are strictly erased during deletion, retry, and background reconciliation, and included in personal data exports.
-3. Authentication and AI rate limiters prevent credential stuffing and uncontrolled cloud LLM consumption.
-4. Upstream Gemini quota errors return actionable HTTP 429 responses.
-5. All **356 automated tests pass with 100% success** (270 backend, 77 frontend, 9 Playwright E2E), zero migrations pending, and clean production builds.
+3. In-flight AI recipe and telemetry writes are fenced with database-backed checks and compensating rollbacks against concurrent account deletion.
+4. Unified authentication and AI rate limiters prevent credential stuffing and enforce shared per-user AI quotas across routes.
+5. Upstream Gemini quota errors return actionable HTTP 429 responses, and frontend client timeouts are aligned to 35 seconds.
+6. All **360 automated tests pass with 100% success** (273 backend, 78 frontend, 9 Playwright E2E), zero migrations pending, and clean production builds.
 
 PantryPal is cleared for production release.
