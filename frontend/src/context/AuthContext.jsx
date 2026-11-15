@@ -71,6 +71,13 @@ export const AuthProvider = ({ children }) => {
     setUser((prev) => (prev ? { ...prev, ...userData } : userData));
   };
 
+  const updateToken = (newToken) => {
+    if (newToken) {
+      localStorage.setItem('token', newToken);
+      setToken(newToken);
+    }
+  };
+
   const refreshUser = async () => {
     try {
       const response = await api.get('/auth/me');
@@ -90,6 +97,7 @@ export const AuthProvider = ({ children }) => {
     register,
     logout,
     updateUser,
+    updateToken,
     refreshUser,
     loading
   };

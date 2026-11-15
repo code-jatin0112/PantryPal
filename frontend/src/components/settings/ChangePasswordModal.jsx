@@ -4,6 +4,7 @@ import { Lock, Eye, EyeOff, ShieldCheck, Check } from 'lucide-react';
 import Modal from '../ui/Modal';
 import Button from '../ui/Button';
 import { useToast } from '../../context/ToastContext';
+import { useAuth } from '../../context/AuthContext';
 import { changeUserPassword } from '../../services/authService';
 
 const getPasswordStrength = (pass = '') => {
@@ -22,6 +23,7 @@ const getPasswordStrength = (pass = '') => {
 
 const ChangePasswordModal = ({ isOpen, onClose }) => {
   const toast = useToast();
+  const auth = useAuth();
   const [showCurrent, setShowCurrent] = useState(false);
   const [showNew, setShowNew] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
@@ -58,11 +60,17 @@ const ChangePasswordModal = ({ isOpen, onClose }) => {
         toast('New passwords do not match.', 'error');
         return;
       }
-      await changeUserPassword({
+      const res = await changeUserPassword({
         currentPassword: data.currentPassword,
         newPassword: data.newPassword,
         confirmPassword: data.confirmPassword,
       });
+      if (res?.accessToken) {
+        localStorage.setItem('token', res.accessToken);
+        if (auth?.updateToken) {
+          auth.updateToken(res.accessToken);
+        }
+      }
       toast('Password changed successfully! 🔒', 'success');
       reset();
       onClose();

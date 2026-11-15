@@ -8,10 +8,11 @@ const getJwtSecret = () => {
   return process.env.JWT_SECRET;
 };
 
-export const generateAccessToken = (userId) => {
+export const generateAccessToken = (userId, tokenVersion = 0) => {
   return jwt.sign(
     {
       sub: userId,
+      tokenVersion,
     },
     getJwtSecret(),
     {
