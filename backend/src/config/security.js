@@ -118,3 +118,22 @@ export const getRateLimiter = (options = {}) => {
   });
 };
 
+export const getSensitiveActionLimiter = (options = {}) => {
+  return rateLimit({
+    windowMs: options.windowMs ?? 15 * 60 * 1000,
+    max: options.max ?? 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    handler: (req, res) => {
+      return res.status(429).json({
+        success: false,
+        error: {
+          code: "RATE_LIMIT_EXCEEDED",
+          message: "Too many attempts, please try again later",
+        },
+      });
+    },
+    ...options,
+  });
+};
+

@@ -13,13 +13,15 @@ datasource db {
 }
 
 model User {
-  id        String   @id @default(uuid())
-  email     String   @unique
-  password  String
-  name      String?
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id             String   @id @default(uuid())
+  email          String   @unique
+  password       String
+  name           String?
+  isActive       Boolean  @default(true)
+  tokenVersion   Int      @default(0)
+  deletionStatus String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   pantries        Pantry[]
   recipes         Recipe[]

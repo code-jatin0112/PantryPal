@@ -67,12 +67,38 @@ export const AuthProvider = ({ children }) => {
     navigate('/login');
   };
 
+  const updateUser = (userData) => {
+    setUser((prev) => (prev ? { ...prev, ...userData } : userData));
+  };
+
+  const updateToken = (newToken) => {
+    if (newToken) {
+      localStorage.setItem('token', newToken);
+      setToken(newToken);
+    }
+  };
+
+  const refreshUser = async () => {
+    try {
+      const response = await api.get('/auth/me');
+      const userData = response.data?.data?.user || response.data?.data;
+      setUser(userData);
+      return userData;
+    } catch (err) {
+      console.error('Failed to refresh user profile:', err);
+      throw err;
+    }
+  };
+
   const value = {
     user,
     token,
     login,
     register,
     logout,
+    updateUser,
+    updateToken,
+    refreshUser,
     loading
   };
 

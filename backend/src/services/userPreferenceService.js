@@ -1,7 +1,7 @@
 import prisma from "../config/database.js";
 
 export const getUserPreferences = async (userId) => {
-  return prisma.userPreference.upsert({
+  const prefs = await prisma.userPreference.upsert({
     where: { userId },
     update: {},
     create: {
@@ -14,14 +14,20 @@ export const getUserPreferences = async (userId) => {
       defaultBudget: null,
     },
   });
+
+  return {
+    ...prefs,
+    dietaryRequirements: prefs.dietaryPreferences,
+  };
 };
 
 export const updateUserPreferences = async (userId, data) => {
   const updateData = {};
 
-  if (data.dietaryPreferences !== undefined) {
-    updateData.dietaryPreferences = Array.isArray(data.dietaryPreferences)
-      ? [...new Set(data.dietaryPreferences.map((s) => (typeof s === "string" ? s.trim() : s)).filter(Boolean))]
+  const inputDietary = data.dietaryPreferences !== undefined ? data.dietaryPreferences : data.dietaryRequirements;
+  if (inputDietary !== undefined) {
+    updateData.dietaryPreferences = Array.isArray(inputDietary)
+      ? [...new Set(inputDietary.map((s) => (typeof s === "string" ? s.trim() : s)).filter(Boolean))]
       : [];
   }
 
@@ -59,9 +65,14 @@ export const updateUserPreferences = async (userId, data) => {
     defaultBudget: updateData.defaultBudget ?? null,
   };
 
-  return prisma.userPreference.upsert({
+  const result = await prisma.userPreference.upsert({
     where: { userId },
     update: updateData,
     create: createData,
   });
+
+  return {
+    ...result,
+    dietaryRequirements: result.dietaryPreferences,
+  };
 };

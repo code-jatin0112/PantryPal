@@ -4,6 +4,8 @@ import { Lock, Eye, EyeOff, ShieldCheck, Check } from 'lucide-react';
 import Modal from '../ui/Modal';
 import Button from '../ui/Button';
 import { useToast } from '../../context/ToastContext';
+import { useAuth } from '../../context/AuthContext';
+import { changeUserPassword } from '../../services/authService';
 
 const getPasswordStrength = (pass = '') => {
   if (!pass) return { score: 0, label: 'None', color: 'bg-gray-200' };
@@ -21,6 +23,7 @@ const getPasswordStrength = (pass = '') => {
 
 const ChangePasswordModal = ({ isOpen, onClose }) => {
   const toast = useToast();
+  const auth = useAuth();
   const [showCurrent, setShowCurrent] = useState(false);
   const [showNew, setShowNew] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
@@ -42,12 +45,42 @@ const ChangePasswordModal = ({ isOpen, onClose }) => {
   const newPassValue = watch('newPassword');
   const strength = getPasswordStrength(newPassValue);
 
+  React.useEffect(() => {
+    if (isOpen) {
+      reset();
+      setShowCurrent(false);
+      setShowNew(false);
+      setShowConfirm(false);
+    }
+  }, [isOpen, reset]);
+
   const onSubmit = async (data) => {
-    // Simulate password change API call
-    await new Promise((resolve) => setTimeout(resolve, 800));
-    toast('Password changed successfully! 🔒', 'success');
-    reset();
-    onClose();
+    try {
+      if (data.newPassword !== data.confirmPassword) {
+        toast('New passwords do not match.', 'error');
+        return;
+      }
+      const res = await changeUserPassword({
+        currentPassword: data.currentPassword,
+        newPassword: data.newPassword,
+        confirmPassword: data.confirmPassword,
+      });
+      if (res?.accessToken) {
+        localStorage.setItem('token', res.accessToken);
+        if (auth?.updateToken) {
+          auth.updateToken(res.accessToken);
+        }
+      }
+      toast('Password changed successfully! 🔒', 'success');
+      reset();
+      onClose();
+    } catch (err) {
+      const errMsg =
+        err.response?.data?.error?.message ||
+        err.message ||
+        'Failed to change password. Please check your current password.';
+      toast(errMsg, 'error');
+    }
   };
 
   return (
