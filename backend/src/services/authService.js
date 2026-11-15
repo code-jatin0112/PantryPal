@@ -332,6 +332,11 @@ export const deleteUserAccount = async ({ userId, password }) => {
     });
   });
 
+  // Final purge sweep to eliminate any lingering in-flight NoSQL telemetry
+  if (process.env.MONGO_URI || process.env.MONGO_TEST_URI) {
+    cleanUserMongoData(userId).catch(() => {});
+  }
+
   return {
     message: "Account and associated data deleted successfully",
   };
@@ -421,6 +426,11 @@ export const retryAccountDeletion = async ({ email, password, userId }) => {
       where: { id: user.id },
     });
   });
+
+  // Final purge sweep to eliminate any lingering in-flight NoSQL telemetry
+  if (process.env.MONGO_URI || process.env.MONGO_TEST_URI) {
+    cleanUserMongoData(user.id).catch(() => {});
+  }
 
   return {
     status: "COMPLETED",
