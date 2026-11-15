@@ -23,12 +23,13 @@ import SettingsSection from '../../components/settings/SettingsSection';
 import ToggleSwitch from '../../components/settings/ToggleSwitch';
 import PreferenceCard from '../../components/settings/PreferenceCard';
 import ChangePasswordModal from '../../components/settings/ChangePasswordModal';
-import ConfirmDialog from '../../components/ui/ConfirmDialog';
+import DeleteAccountModal from '../../components/settings/DeleteAccountModal';
 import Button from '../../components/ui/Button';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 
 import { getUserPreferences, updateUserPreferences } from '../../services/preferenceService';
+import { exportUserData, deleteUserAccount } from '../../services/authService';
 
 const STORAGE_SETTINGS_KEY = 'pantrypal_user_settings';
 
@@ -92,6 +93,7 @@ const Settings = () => {
   const [activeTab, setActiveTab] = useState('general');
   const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [dislikedInput, setDislikedInput] = useState('');
 
   // Load preferences from backend on mount
@@ -103,7 +105,11 @@ const Settings = () => {
           setSettings((prev) => ({
             ...prev,
             ...backendPrefs,
-            diets: backendPrefs.dietaryRequirements || backendPrefs.diets || prev.diets,
+            diets:
+              backendPrefs.dietaryPreferences ||
+              backendPrefs.dietaryRequirements ||
+              backendPrefs.diets ||
+              prev.diets,
             allergies: backendPrefs.allergies || prev.allergies,
             dislikedIngredients: backendPrefs.dislikedIngredients || prev.dislikedIngredients,
           }));
@@ -143,6 +149,7 @@ const Settings = () => {
     try {
       await updateUserPreferences({
         ...settings,
+        dietaryPreferences: settings.diets,
         dietaryRequirements: settings.diets,
         allergies: settings.allergies,
         dislikedIngredients: settings.dislikedIngredients,
@@ -194,36 +201,48 @@ const Settings = () => {
   };
 
   // Export User Data
-  const handleExportData = () => {
-    const exportBundle = {
-      exportedAt: new Date().toISOString(),
-      appVersion: '1.0.0-production',
-      settings,
-      profile: JSON.parse(localStorage.getItem('pantrypal_user_profile') || '{}'),
-      conversations: JSON.parse(localStorage.getItem('pantrypal_chat_conversations') || '[]'),
-    };
+  const handleExportData = async () => {
+    try {
+      toast('Exporting complete kitchen archive...', 'info');
+      const serverExport = await exportUserData();
+      const exportBundle = {
+        ...serverExport,
+        localSettings: settings,
+        localConversations: JSON.parse(
+          localStorage.getItem('pantrypal_chat_conversations') || '[]'
+        ),
+      };
 
-    const blob = new Blob([JSON.stringify(exportBundle, null, 2)], {
-      type: 'application/json',
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `pantrypal_kitchen_archive_${new Date().toISOString().split('T')[0]}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+      const blob = new Blob([JSON.stringify(exportBundle, null, 2)], {
+        type: 'application/json',
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `pantrypal_kitchen_archive_${new Date().toISOString().split('T')[0]}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
 
-    toast('Complete kitchen archive exported! 📦', 'success');
+      toast('Complete kitchen archive exported! 📦', 'success');
+    } catch (err) {
+      toast(err.response?.data?.error?.message || 'Failed to export kitchen data', 'error');
+    }
   };
 
   // Delete Account
-  const handleDeleteAccount = async () => {
-    localStorage.clear();
-    await logout();
-    toast('Account and local data deleted.', 'info');
-    navigate('/register');
+  const handleDeleteAccount = async (password) => {
+    try {
+      setIsDeleting(true);
+      await deleteUserAccount({ password });
+      localStorage.clear();
+      await logout();
+      toast('Account and all associated kitchen data permanently deleted.', 'info');
+      navigate('/register');
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   return (
@@ -822,14 +841,11 @@ const Settings = () => {
         onClose={() => setIsPasswordModalOpen(false)}
       />
 
-      <ConfirmDialog
+      <DeleteAccountModal
         isOpen={isDeleteModalOpen}
         onClose={() => setIsDeleteModalOpen(false)}
         onConfirm={handleDeleteAccount}
-        title="Delete Account Permanently?"
-        message="Are you sure you want to permanently erase your PantryPal account? All recipes, inventory items, and shopping lists will be wiped immediately."
-        confirmText="Yes, Delete My Account"
-        confirmVariant="danger"
+        isDeleting={isDeleting}
       />
     </motion.div>
   );
