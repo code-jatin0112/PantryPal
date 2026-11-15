@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from "vitest";
 import supertest from "supertest";
 import app from "../../src/app.js";
 import prisma from "../../src/config/database.js";
@@ -311,11 +311,19 @@ describe("Durable Deletion Recovery & Strict Test Isolation Suite", () => {
       expect(res.status).toBe(401);
       expect(res.body.error.code).toBe("INVALID_CREDENTIALS");
     });
+
+    afterAll(async () => {
+      if (activeUser?.id) {
+        await prisma.pantry.deleteMany({ where: { userId: activeUser.id } });
+        await prisma.user.deleteMany({ where: { id: activeUser.id } });
+      }
+    });
   });
 
   // ── 3. Partial Failure, Session Loss, and Identity-Verified Retry ─
   describe("3. Partial Failure, Session Loss, and Identity-Verified Retry", () => {
     const testPassword = "StrandedPassword123!";
+    const createdUserIds = new Set();
 
     const createTestUser = async ({ isActive = true, deletionStatus = null, tokenVersion = 0 } = {}) => {
       const hashedPass = await hashPassword(testPassword);
@@ -334,9 +342,22 @@ describe("Durable Deletion Recovery & Strict Test Isolation Suite", () => {
           },
         },
       });
+      createdUserIds.add(user.id);
       const token = generateAccessToken(user.id, tokenVersion);
       return { user, token };
     };
+
+    afterEach(async () => {
+      if (createdUserIds.size > 0) {
+        const ids = Array.from(createdUserIds);
+        createdUserIds.clear();
+        await prisma.pantry.deleteMany({ where: { userId: { in: ids } } });
+        await prisma.user.deleteMany({ where: { id: { in: ids } } });
+        try {
+          await AiInteractionLog.deleteMany({ userId: { in: ids } });
+        } catch {}
+      }
+    });
 
     it("handles MongoDB failure: sets DELETION_FAILED, locks out user, returns 502", async () => {
       const { user, token } = await createTestUser({ isActive: true, deletionStatus: null, tokenVersion: 0 });
