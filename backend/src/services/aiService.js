@@ -67,6 +67,22 @@ const executeAIRequest = async ({
       throw error;
     }
 
+    const isQuotaExceeded =
+      error.status === 429 ||
+      error.statusCode === 429 ||
+      error.code === 429 ||
+      error.message?.includes("429") ||
+      error.message?.includes("RESOURCE_EXHAUSTED") ||
+      error.message?.toLowerCase().includes("quota");
+
+    if (isQuotaExceeded) {
+      throw new AppError(
+        "AI provider quota exceeded. Please try again in a few moments.",
+        429,
+        "AI_QUOTA_EXCEEDED"
+      );
+    }
+
     console.error("AI service error:", error);
 
     throw new AppError(

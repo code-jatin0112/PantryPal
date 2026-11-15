@@ -137,3 +137,60 @@ export const getSensitiveActionLimiter = (options = {}) => {
   });
 };
 
+export const getAuthLimiter = (options = {}) => {
+  const windowMs = Number(
+    process.env.AUTH_RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000
+  );
+  const max = Number(
+    process.env.AUTH_RATE_LIMIT_MAX_REQUESTS || (process.env.NODE_ENV === "test" ? 100 : 10)
+  );
+
+  return rateLimit({
+    windowMs: options.windowMs ?? windowMs,
+    max: options.max ?? max,
+    standardHeaders: true,
+    legacyHeaders: false,
+    handler: (req, res) => {
+      return res.status(429).json({
+        success: false,
+        error: {
+          code: "RATE_LIMIT_EXCEEDED",
+          message: "Too many authentication attempts, please try again later",
+        },
+      });
+    },
+    ...options,
+  });
+};
+
+export const getAiLimiter = (options = {}) => {
+  const windowMs = Number(
+    process.env.AI_RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000
+  );
+  const max = Number(
+    process.env.AI_RATE_LIMIT_MAX_REQUESTS || (process.env.NODE_ENV === "test" ? 100 : 20)
+  );
+
+  return rateLimit({
+    windowMs: options.windowMs ?? windowMs,
+    max: options.max ?? max,
+    keyGenerator: (req) => {
+      return req.user?.id ? `user:${req.user.id}` : (req.ip || "127.0.0.1");
+    },
+    validate: { keyGeneratorIpFallback: false },
+    standardHeaders: true,
+    legacyHeaders: false,
+    handler: (req, res) => {
+      return res.status(429).json({
+        success: false,
+        error: {
+          code: "RATE_LIMIT_EXCEEDED",
+          message: "AI request quota exceeded for this time window. Please try again later.",
+        },
+      });
+    },
+    ...options,
+  });
+};
+
+
