@@ -61,7 +61,7 @@ If the migration added nullable columns, new tables, or new indexes:
 #### Scenario B: The Migration Failed Mid-Execution
 If a migration fails due to lock timeout or syntax violation, Prisma locks the migration status in `_prisma_migrations`:
 1. **Enable Accessible Connection**:
-   Temporarily enable **Public Networking** on the PostgreSQL service in the Railway Dashboard, copy `DATABASE_PUBLIC_URL`, and export it in your terminal (see [Production Deployment Guide](file:///Users/jatinkashyap/PantryPal/docs/production-deployment.md#42-safe-production-migration-workflow)):
+   Temporarily enable **Public Networking** on the PostgreSQL service in the Railway Dashboard, copy `DATABASE_PUBLIC_URL`, and export it in your terminal (see [Production Deployment Guide](./production-deployment.md#42-safe-production-migration-workflow)):
    ```bash
    export DATABASE_PUBLIC_URL="<value copied from Railway Dashboard>"
 
@@ -74,6 +74,7 @@ If a migration fails due to lock timeout or syntax violation, Prisma locks the m
    ```
 2. **Check Migration State**:
    ```bash
+   cd backend
    DATABASE_URL="$MIGRATE_URL" npx prisma migrate status
    ```
 3. **Mark Failed Migration as Rolled Back**:
@@ -87,21 +88,31 @@ If a migration fails due to lock timeout or syntax violation, Prisma locks the m
 If data was corrupted or incompatible column drops were committed:
 1. **Stop Backend Service & Inhibit All Database Writes (MANDATORY)**:
    > [!CAUTION]
-   > A frontend Vercel maintenance page alone is **insufficient** because direct API clients, background workers, and mobile/cached sessions bypass the frontend and continue issuing writes while `pg_restore --clean` drops and recreates schema objects.
+   > A frontend Vercel maintenance page alone is **insufficient** because direct API clients, background workers, and mobile/cached sessions bypass the frontend and continue issuing writes while `pg_restore` drops and recreates schema objects.
 
    - **Immediately scale backend service replicas to 0** in the Railway Dashboard (or stop the service container).
+   - Terminate active client connections to PostgreSQL.
    - Confirm active database connections are terminated and zero writes are in flight.
    - Optionally display a maintenance notice on the Vercel frontend for user communication.
 2. **Restore PostgreSQL from Pre-Migration Backup Snapshot**:
-   Enable Public Networking on PostgreSQL to allow the external restore connection:
+   Enable Public Networking on PostgreSQL to allow the external restore connection.
+   > [!NOTE]
+   > Note that `--clean` drops objects present in the backup archive, but will not drop newly created tables added after the backup. If new tables or foreign key dependencies were introduced, drop/recreate the public schema or ensure a clean destination before restoring.
    ```bash
-   # Restore snapshot taken prior to deployment
-   pg_restore --clean --if-exists -h <PROXY_HOST> -p <PORT> -U postgres -d railway backup_pre_release_<TIMESTAMP>.dump
+   # Restore snapshot with strict TLS certificate verification and fail-fast error handling:
+   PGSSLMODE=verify-full pg_restore --exit-on-error --clean --if-exists -h <PROXY_HOST> -p <PORT> -U postgres -d railway backup_pre_release_<TIMESTAMP>.dump
    ```
-3. **Verify Schema Integrity & Migrations (Accessible Connection Path)**:
+   Ensure `pg_restore` exits with status `0` before proceeding.
+3. **Verify Schema Integrity & Migrations Against Prior Stable Release**:
    > [!IMPORTANT]
-   > Ensure Public Networking is enabled on the PostgreSQL service in the Railway Dashboard and `DATABASE_PUBLIC_URL` is exported in the local shell (refer to [Production Deployment Guide](file:///Users/jatinkashyap/PantryPal/docs/production-deployment.md#42-safe-production-migration-workflow) for setup details):
+   > Ensure Public Networking is enabled on the PostgreSQL service in the Railway Dashboard and `DATABASE_PUBLIC_URL` is exported in the local shell (refer to [Production Deployment Guide](./production-deployment.md#42-safe-production-migration-workflow) for setup details).
+   > 
+   > **Checkout Prior Stable Release**: Ensure your local working directory is checked out to the prior stable release tag or commit before running `prisma migrate status`. If checked against the failed release's checkout, the newly added migration will falsely appear as pending against the restored database.
    ```bash
+   # Align local migration manifests with the restored database schema
+   git checkout <PRIOR_STABLE_COMMIT_OR_TAG>
+   cd backend
+
    if [[ "$DATABASE_PUBLIC_URL" == *"?"* ]]; then
      MIGRATE_URL="${DATABASE_PUBLIC_URL}&sslmode=require"
    else

@@ -108,9 +108,13 @@ In Phase 7, **automatic schema migrations were explicitly decoupled from `npm st
 When deploying a release that contains new Prisma migrations:
 1. **Freeze Traffic / Announce Window**: Optional for backward-compatible migrations, mandatory for breaking schema changes.
 2. **Execute Full Database Snapshot Backup**:
-   ```bash
-   pg_dump -h <HOST> -U <USER> -d pantrypal -Fc -f backup_pre_release_$(date +%Y%m%d_%H%M%S).dump
-   ```
+   Because Railway PostgreSQL is isolated in a private virtual network by default, choose a reachable backup path before modifying schema:
+   - **In-Platform Snapshot (Recommended)**: In the Railway Dashboard → PostgreSQL Service → **Data** / **Backups** tab → click **Create Backup**. This captures a complete point-in-time snapshot directly within Railway infrastructure without external exposure.
+   - **Manual pg_dump via Workstation**: If taking a local offsite backup, temporarily enable **Public Networking** on the PostgreSQL service in Railway Dashboard, copy and export `DATABASE_PUBLIC_URL`, and run `pg_dump` with TLS:
+     ```bash
+     export DATABASE_PUBLIC_URL="<value from Railway Dashboard>"
+     PGSSLMODE=verify-full pg_dump "$DATABASE_PUBLIC_URL" -Fc -f backup_pre_release_$(date +%Y%m%d_%H%M%S).dump
+     ```
 3. **Execute Migrations via Verified Network Path**:
    > [!IMPORTANT]
    > Railway PostgreSQL is isolated inside the Railway private virtual network by default (`*.railway.internal`). Note that `railway run` executes commands on the **operator's local workstation** (pulling down environment variables) — it does **NOT** execute inside Railway's private network. Because `*.railway.internal` hostnames cannot resolve on local machines, running `railway run ...` locally against private hostnames will fail.
@@ -131,7 +135,7 @@ When deploying a release that contains new Prisma migrations:
      1. **Build**: Railway builds the production container using `backend/Dockerfile`.
      2. **Pre-Deploy Migration**: Before any new containers are started or traffic shifted, Railway spins up an ephemeral container inside Railway's private network using the newly built image and executes `npm run db:migrate:deploy`. This container has native access to `DATABASE_URL` resolving to `postgres.railway.internal`.
      3. **Deploy (Traffic Cutover)**: Only when the pre-deploy command succeeds (exit code `0`) does Railway proceed to start the new backend service container (`npm start`) and route traffic.
-     4. **Failure Guard**: If `db:migrate:deploy` fails or exits non-zero, Railway **aborts the deployment immediately**. The existing running application container remains untouched and continues serving traffic without downtime or broken schema.
+     4. **Failure Guard & Partial Migration Handling**: If `db:migrate:deploy` fails or exits non-zero, Railway **aborts the deployment immediately**, preventing new containers from receiving traffic. However, failed migrations may leave partial schema modifications or locked migration records in `_prisma_migrations`. Operators must inspect database migration status and follow Prisma's recovery workflow (`docs/rollback-runbook.md#scenario-b-the-migration-failed-mid-execution`) before resuming rollout or relying on the existing container.
      5. **Verification**: Inspect the deployment logs in the Railway Dashboard under the **Deployments** tab to review the pre-deploy migration step logs.
 
    - **Option B (Alternative — Authorized External Connection with Mandatory TLS)**:
@@ -142,8 +146,10 @@ When deploying a release that contains new Prisma migrations:
         ```bash
         export DATABASE_PUBLIC_URL="postgresql://postgres:<PASSWORD>@<PROXY_HOST>:<PORT>/railway"
         ```
-     4. **TLS & Query Parameter Handling**: Enforce TLS (`sslmode=require`) and handle URL parameters safely to avoid malformed query strings if `DATABASE_PUBLIC_URL` already includes parameters:
+     4. **TLS, Working Directory & Query Parameter Handling**: Ensure commands are executed from the `backend/` directory (where `package.json` defines the scripts). Enforce TLS (`sslmode=require`) and handle URL parameters safely to avoid malformed query strings if `DATABASE_PUBLIC_URL` already includes parameters:
         ```bash
+        cd backend
+
         # Safely append sslmode=require handling existing query params
         if [[ "$DATABASE_PUBLIC_URL" == *"?"* ]]; then
           MIGRATE_URL="${DATABASE_PUBLIC_URL}&sslmode=require"
