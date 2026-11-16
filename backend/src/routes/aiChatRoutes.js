@@ -1,5 +1,6 @@
 import express from "express";
 import { authenticate } from "../middleware/authMiddleware.js";
+import { sharedAiLimiter } from "../config/security.js";
 import {
   chatWithKitchenAssistantController,
 } from "../controllers/aiChatController.js";
@@ -14,6 +15,7 @@ router.use(authenticate);
 
 router.post(
   "/chat",
+  sharedAiLimiter,
   chatWithKitchenAssistantValidation,
   handleValidationErrors,
   chatWithKitchenAssistantController

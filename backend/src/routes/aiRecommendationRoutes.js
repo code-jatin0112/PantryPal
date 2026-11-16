@@ -1,6 +1,7 @@
 import express from "express";
 
 import { authenticate } from "../middleware/authMiddleware.js";
+import { sharedAiLimiter } from "../config/security.js";
 
 import {
   generateAIRecommendationsController,
@@ -18,6 +19,7 @@ router.use(authenticate);
 
 router.post(
   "/recommendations",
+  sharedAiLimiter,
   generateAIRecommendationsValidation,
   handleValidationErrors,
   generateAIRecommendationsController

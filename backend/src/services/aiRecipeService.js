@@ -14,6 +14,7 @@ import {
   buildRecipeGenerationPrompt,
 } from "../utils/aiContextBuilder.js";
 import { UnstructuredRecipe } from "../models/UnstructuredRecipe.js";
+import { safePersistUserMongoRecord } from "../utils/dataErasureCoordinator.js";
 
 export const generateRecipeFromPantry = async ({
   userId,
@@ -98,17 +99,18 @@ Important rules:
     );
   }
 
-  // Persist unstructured recipe generation into MongoDB (NoSQL)
-  try {
-    await UnstructuredRecipe.create({
-      userId,
-      sourcePrompt: preferences || "Pantry Recipe Generation",
-      rawOutput: recipe,
-      conversionStatus: "NORMALIZED",
-    });
-  } catch (mongoErr) {
-    console.warn("MongoDB unstructured recipe save skipped:", mongoErr.message);
-  }
+  // Persist unstructured recipe generation into MongoDB (NoSQL) with durable database-backed coordination
+  await safePersistUserMongoRecord({
+    userId,
+    targetCollection: "UnstructuredRecipe",
+    createRecordFn: () =>
+      UnstructuredRecipe.create({
+        userId,
+        sourcePrompt: preferences || "Pantry Recipe Generation",
+        rawOutput: recipe,
+        conversionStatus: "NORMALIZED",
+      }),
+  });
 
   return {
     pantry: {

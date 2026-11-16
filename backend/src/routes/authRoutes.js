@@ -1,6 +1,6 @@
 import express from "express";
 import { authenticate } from "../middleware/authMiddleware.js";
-import { getSensitiveActionLimiter } from "../config/security.js";
+import { getSensitiveActionLimiter, getAuthLimiter } from "../config/security.js";
 
 import {
   register,
@@ -24,9 +24,11 @@ import {
 
 const router = express.Router();
 const sensitiveLimiter = getSensitiveActionLimiter();
+const authLimiter = getAuthLimiter();
 
 router.post(
   "/register",
+  authLimiter,
   registerValidation,
   handleValidationErrors,
   register
@@ -34,6 +36,7 @@ router.post(
 
 router.post(
   "/login",
+  authLimiter,
   loginValidation,
   handleValidationErrors,
   login

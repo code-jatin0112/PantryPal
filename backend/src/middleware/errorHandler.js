@@ -1,5 +1,10 @@
+import { sanitizeDatabaseUrl } from "../utils/testDatabaseGuard.js";
+
 export const errorHandler = (err, req, res, next) => {
-  console.error(err);
+  if (err) {
+    const rawMsg = err.stack || err.message || String(err);
+    console.error(sanitizeDatabaseUrl(rawMsg));
+  }
 
   const statusCode = err.statusCode || 500;
 

@@ -6,7 +6,7 @@ import { AI } from '../constants/api';
  */
 export const getAIRecommendations = async (payload) => {
   try {
-    const res = await api.post(AI.RECOMMENDATIONS, payload);
+    const res = await api.post(AI.RECOMMENDATIONS, payload, { timeout: 35000 });
     const data = res.data?.data;
     if (data && Array.isArray(data.recommendations)) {
       return data.recommendations;

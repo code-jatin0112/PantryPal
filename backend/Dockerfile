@@ -10,8 +10,8 @@ COPY package*.json ./
 COPY prisma.config.ts ./
 COPY prisma ./prisma/
 
-# Install dependencies
-RUN npm install
+# Install production dependencies
+RUN npm ci --omit=dev
 
 # Copy remaining source code
 COPY . .

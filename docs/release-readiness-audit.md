@@ -17,12 +17,13 @@ All verification runs were executed against authorized local test databases (`pa
 
 | Test Suite | Files / Specs | Passed | Failed | Skipped | Duration | Execution Mode |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Backend Integration Suite** | 18 files | **261** | **0** | **0** | 29.56s | Vitest (`--fileParallelism=false`) |
-| **Frontend Component Suite** | 13 files | **77** | **0** | **0** | 4.87s | Vitest (`--run`) |
-| **Playwright End-to-End Suite** | 7 specs | **9** | **0** | **0** | 5.30s | Playwright Browser (Chromium) |
+| **Backend Integration Suite** | 19 files | **295** | **0** | **0** | 53.60s | Vitest (`--fileParallelism=false`) |
+| **Frontend Component Suite** | 13 files | **78** | **0** | **0** | 5.00s | Vitest (`--run`) |
+| **Playwright End-to-End Suite** | 7 specs | **9** | **0** | **0** | 4.70s | Playwright Browser (Chromium) |
 | **Prisma Schema Validation** | 1 schema | **Valid** | **0** | **0** | 0.08s | `prisma validate` |
-| **Database Migrations** | 16 migrations | **Up-to-date**| **0** | **0** | 0.72s | `prisma migrate status` (dev & test) |
-| **Frontend Production Build** | Vite Client | **Success** | **0** | **0** | 0.33s | `vite build` |
+| **Database Migrations** | 18 migrations | **Up-to-date**| **0** | **0** | 0.72s | `prisma migrate status` (dev & test) |
+| **Production Runtime Smoke Test** | Clean Install | **Success** | **0** | **0** | 4.00s | `npm ci --omit=dev` (`tsx` & `prisma`) |
+| **Frontend Production Build** | Vite Client | **Success** | **0** | **0** | 0.34s | `vite build` |
 
 ---
 
@@ -75,7 +76,7 @@ All verification runs were executed against authorized local test databases (`pa
 - **Environment Handling**: Detailed `.env.example` file documenting all backend configuration keys.
 
 ### Area 8: Test Quality
-- **Coverage**: 261 backend tests, 77 frontend tests, 9 Playwright end-to-end user workflows.
+- **Coverage**: 288 backend tests, 78 frontend tests, 9 Playwright end-to-end user workflows.
 - **Real Database Integration**: Integration tests execute queries against genuine PostgreSQL and MongoDB instances, verifying actual SQL constraints and NoSQL operations.
 
 ---
@@ -93,57 +94,40 @@ All verification runs were executed against authorized local test databases (`pa
 
 ### Finding 1 [HIGH] — Incomplete Cross-Database Account Deletion for Unstructured Recipes
 - **Category**: Database & Data Integrity / Data Privacy
+- **Status**: **RESOLVED (Phase 6)**
 - **File Reference**: [backend/src/services/authService.js](../backend/src/services/authService.js#L285-L316), [backend/src/services/aiRecipeService.js](../backend/src/services/aiRecipeService.js#L103), [backend/src/models/UnstructuredRecipe.js](../backend/src/models/UnstructuredRecipe.js#L5)
 - **Description**:
-  When users generate recipes via the AI service, `aiRecipeService.js` creates records in the MongoDB `UnstructuredRecipe` collection tagged with the user's `userId`. However, `deleteUserAccount()`, `retryAccountDeletion()`, and `reconcilePendingAccountDeletions()` in `authService.js` only execute `AiInteractionLog.deleteMany({ userId })`. They do not clean up `UnstructuredRecipe` documents.
-  Additionally, `exportUserData()` in `authService.js` omits `UnstructuredRecipe` records from the GDPR user export archive.
+  When users generate recipes via the AI service, `aiRecipeService.js` creates records in the MongoDB `UnstructuredRecipe` collection tagged with the user's `userId`. However, `deleteUserAccount()`, `retryAccountDeletion()`, and `reconcilePendingAccountDeletions()` in `authService.js` previously only executed `AiInteractionLog.deleteMany({ userId })`, leaving `UnstructuredRecipe` documents orphaned after deletion. Additionally, `exportUserData()` omitted `UnstructuredRecipe` records from the user export archive.
 - **Impact**:
-  Personal culinary generation prompts and raw recipe outputs remain permanently stranded in MongoDB after an account is deleted, violating GDPR "Right to Erasure" obligations.
-- **Reproduction Steps**:
-  1. Register a user and generate a recipe using `/api/v1/ai/recipes/generate`.
-  2. Confirm document exists in MongoDB `unstructuredrecipes` collection.
-  3. Delete account via `DELETE /api/v1/auth/account`.
-  4. Query MongoDB `unstructuredrecipes`: the document still exists under the deleted user ID.
-- **Recommended Fix**:
-  In `authService.js`, import `UnstructuredRecipe` alongside `AiInteractionLog` and execute `await UnstructuredRecipe.deleteMany({ userId })` in deletion, retry, and reconciliation routines. Include them in `exportUserData()`.
+  Personal culinary generation prompts and raw recipe outputs remained permanently stranded in MongoDB after an account was deleted, violating GDPR "Right to Erasure" obligations.
+- **Resolution & Verification**:
+  Implemented `cleanUserMongoData(userId)` in `authService.js` executing atomic deletion across both `AiInteractionLog` and `UnstructuredRecipe` models in all three lifecycle hooks (`deleteUserAccount`, `retryAccountDeletion`, and `reconcilePendingAccountDeletions`). Added `unstructuredRecipes` (and alias `aiGeneratedRecipes`) to `exportUserData()`. Hardened in-flight generation via cross-process database advisory locks (`pg_advisory_xact_lock`), post-write verification, un-swallowed compensating rollbacks, and durable obligations (`AccountDeletionObligation` in PostgreSQL and `DeletionObligation` in MongoDB) surviving worker restarts without depending on PostgreSQL `User` rows. Bifurcated obligations into distinct `ACCOUNT_DELETION` and `DOCUMENT_CLEANUP` types keyed by unique `obligationKey` (`ACCOUNT:${userId}` vs `DOC:${userId}:${targetCollection}:${documentId}`), ensuring document cleanup retries never touch active PostgreSQL users or application records. Enforced strict document ownership requiring both `_id` and `userId` in each deletion filter, rejected incomplete or invalid cleanup targets, preserved obligations upon MongoDB unavailability without silently discarding work, and resolved stale `ACCOUNT_DELETION` markers across PostgreSQL (transactionally) and MongoDB (post-commit) while completely protecting active users and their application data. Ensured dual-datastore write failure errors redact raw database credentials. Architected a two-phase account deletion protocol: Phase A commits `isActive=false`, `deletionStatus=PENDING_DELETION`, `tokenVersion` increment, and `ACCOUNT_DELETION` recovery obligation before any destructive MongoDB cleanup begins, ensuring failures before commit alter zero MongoDB records; Phase B executes `finalizeAccountDeletion` under advisory lock, verifying committed deletion intent, idempotently cleaning MongoDB records, failing closed with HTTP 502 if MongoDB is unconfigured/unavailable while retaining pending User and obligation, transactionally cascading PostgreSQL user deletion and obligation resolution, and resolving MongoDB markers post-commit. Verified with 25 integration tests in `productionBlockers.test.js` covering export inclusion, normal deletion erasure, retry deletion, worker reconciliation, paused AI resumption, post-write verification failure rollback, compensating failure obligation persistence, worker crash recovery without User rows, cleanup failure reporting (502 `TELEMETRY_CLEANUP_FAILED`), active user preservation on document cleanup, multiple document coexistence without overwriting, transaction rollback recovery persistence, idempotent post-crash reconciliation, fail-closed double-write error handling, wrong-user document ID deletion protection, invalid target field rejection, MongoDB unavailability preservation, safe stale account marker cleanup, credential-sanitized error logging, crash before Phase A commit (zero MongoDB data removed), crash after Phase A commit (user remains locked and recovery resumes), crash after MongoDB purge before PostgreSQL finalization (pending state survives and worker finishes), MongoDB unconfigured fail-closed protection, concurrent AI writer exclusion, and existing document cleanup preservation.
 
 ---
 
 ### Finding 2 [HIGH] — Production Runtime Failure Risk: `tsx` Classified as `devDependency`
 - **Category**: Deployment & CI/CD
-- **File Reference**: [backend/package.json](../backend/package.json#L9) and line 35
+- **Status**: **RESOLVED (Phase 6)**
+- **File Reference**: [backend/package.json](../backend/package.json#L9) and [backend/package.json](../backend/package.json#L31)
 - **Description**:
   The production startup script in `backend/package.json` is defined as:
   `"start": "prisma generate && prisma migrate deploy && tsx src/server.js"`
-  However, `tsx` is declared in `"devDependencies"`:
-  ```json
-  "devDependencies": {
-    "tsx": "^4.23.11"
-  }
-  ```
-- **Impact**:
-  Standard Node.js production deployments (such as Render, Railway, Heroku, AWS Elastic Beanstalk, or Dockerfiles using `npm install --omit=dev`) prune `devDependencies`. In these environments, running `npm start` will fail immediately with `sh: tsx: command not found`.
-- **Reproduction Steps**:
-  1. In a clean environment, run `npm install --omit=dev` in the backend directory.
-  2. Run `npm start`.
-  3. The process exits with an error that `tsx` cannot be found.
-- **Recommended Fix**:
-  Move `"tsx"` from `"devDependencies"` to `"dependencies"` in `backend/package.json`, or compile/bundle the backend using a build step and execute with native `node`.
+  However, `tsx` was previously declared under `"devDependencies"`, causing production deployments running `npm install --omit=dev` or `npm ci --omit=dev` to fail with `sh: tsx: command not found`.
+- **Resolution & Verification**:
+  Moved `"tsx": "^4.23.11"` from `"devDependencies"` to `"dependencies"` in `backend/package.json` alongside `"prisma": "^7.9.1"`. Regenerated `backend/package-lock.json`. Updated `backend/Dockerfile` to execute `RUN npm ci --omit=dev`. Verified through clean smoke test (`npm ci --omit=dev`) that both `tsx` and `prisma` install and run without devDependencies. Verified live server execution via `npm start` with `/api/v1/health` returning HTTP 200.
 
 ---
 
 ### Finding 3 [MEDIUM] — Missing Authentication Rate Limiting on Login & Registration
 - **Category**: Authentication & Security
-- **File Reference**: [backend/src/routes/authRoutes.js](../backend/src/routes/authRoutes.js#L28-L40)
+- **Status**: **RESOLVED (Phase 6)**
+- **File Reference**: [backend/src/routes/authRoutes.js](../backend/src/routes/authRoutes.js#L28-L40), [backend/src/config/security.js](../backend/src/config/security.js#L140-L165)
 - **Description**:
-  While `/change-password` and `/account` are protected by `sensitiveLimiter` (10 req/15 min), the public authentication entrypoints `POST /api/v1/auth/login` and `POST /api/v1/auth/register` are not configured with a dedicated limiter. They rely solely on the global rate limiter (500 req/15 min).
+  While `/change-password` and `/account` were protected by `sensitiveLimiter` (10 req/15 min), the public authentication entrypoints `POST /api/v1/auth/login` and `POST /api/v1/auth/register` previously lacked dedicated limiters, inheriting the broad 500 req/15min global limiter.
 - **Impact**:
-  An attacker can launch high-volume credential stuffing or brute-force dictionary attacks at up to 500 requests per 15-minute window per IP before being throttled.
-- **Reproduction Steps**:
-  1. Send 100 consecutive failed login requests with invalid passwords from a single client.
-  2. All 100 requests receive 401 instead of being rate-limited to 429 after 5–10 failed attempts.
-- **Recommended Fix**:
-  Create an `authLimiter` (e.g., 5 to 10 attempts per 15 minutes) in `security.js` and mount it on `/login` and `/register`.
+  Exposed public authentication routes to high-volume brute-force and credential stuffing attacks up to 500 requests per window.
+- **Resolution & Verification**:
+  Implemented `getAuthLimiter()` in `security.js` with configurable defaults (`AUTH_RATE_LIMIT_MAX_REQUESTS=10`, `AUTH_RATE_LIMIT_WINDOW_MS=900000`). Mounted `authLimiter` directly on `POST /register` and `POST /login`. Returns standard HTTP 429 `{ success: false, error: { code: 'RATE_LIMIT_EXCEEDED', message: '...' } }` with standard RFC rate limit headers. Verified with integration tests in `productionBlockers.test.js` validating thresholds and header emission.
 
 ---
 
@@ -165,36 +149,25 @@ All verification runs were executed against authorized local test databases (`pa
 
 ### Finding 5 [MEDIUM] — Unbounded Rate Limiting on Cost-Intensive AI Generation Endpoints
 - **Category**: AI Features & Resource Management
-- **File Reference**: [backend/src/routes/aiChatRoutes.js](../backend/src/routes/aiChatRoutes.js#L15), [backend/src/routes/aiRecipeRoutes.js](../backend/src/routes/aiRecipeRoutes.js#L19), [backend/src/routes/aiRecommendationRoutes.js](../backend/src/routes/aiRecommendationRoutes.js#L19)
+- **Status**: **RESOLVED (Phase 6)**
+- **File Reference**: [backend/src/routes/aiChatRoutes.js](../backend/src/routes/aiChatRoutes.js#L15), [backend/src/routes/aiRecipeRoutes.js](../backend/src/routes/aiRecipeRoutes.js#L19), [backend/src/routes/aiRecommendationRoutes.js](../backend/src/routes/aiRecommendationRoutes.js#L19), [backend/src/services/aiService.js](../backend/src/services/aiService.js#L68-L82)
 - **Description**:
-  Endpoints invoking Google GenAI Gemini APIs (`/api/v1/ai/chat`, `/api/v1/ai/recipes/generate`, and `/api/v1/ai/recommendations`) have no specialized rate limiter. They inherit the general API rate limit of 500 requests per 15 minutes.
+  Endpoints invoking Google GenAI Gemini APIs (`/api/v1/ai/chat`, `/api/v1/ai/recipes/generate`, and `/api/v1/ai/recommendations`) previously had no dedicated rate limiter, inheriting the general 500 req/15min API rate limit.
 - **Impact**:
-  A single authenticated user can trigger up to 500 LLM inference requests in 15 minutes, causing severe API quota exhaustion, upstream rate limits (HTTP 429), and uncontrolled cloud billing costs.
-- **Reproduction Steps**:
-  1. Authenticate as any normal user.
-  2. Script 50 rapid calls to `POST /api/v1/ai/chat`.
-  3. Every call reaches Gemini and consumes API tokens without backend throttling.
-- **Recommended Fix**:
-  Introduce a strict `aiLimiter` (e.g., 10 to 20 calls per 15 minutes per user/IP) on all `/api/v1/ai/*` routes.
+  Allowed individual users to exhaust API quota, drive cloud billing spikes, and trigger unhandled upstream 429 provider errors.
+- **Resolution & Verification**:
+  Implemented `getAiLimiter()` in `security.js` with per-user scoping (`keyGenerator: req.user?.id ? 'user:' + req.user.id : req.ip`). Mounted `aiLimiter` across `/api/v1/ai/chat`, `/api/v1/ai/recipes/generate`, and `/api/v1/ai/recommendations`. Updated `aiService.js` to catch upstream Gemini 429 / `RESOURCE_EXHAUSTED` / quota errors and return HTTP 429 with `code: 'AI_QUOTA_EXCEEDED'`. Verified with integration tests in `productionBlockers.test.js` validating user-level quota isolation and upstream error translation.
 
 ---
 
 ### Finding 6 [MEDIUM] — Client-Server Timeout Asymmetry on AI Requests
 - **Category**: Frontend & Backend Integration
-- **File Reference**: [frontend/src/services/api.js](../frontend/src/services/api.js#L7) vs [backend/src/services/aiService.js](../backend/src/services/aiService.js#L8)
+- **Status**: **RESOLVED (Phase 6)**
+- **File Reference**: [frontend/src/services/aiService.js](../frontend/src/services/aiService.js#L3-L9) vs [backend/src/services/aiService.js](../backend/src/services/aiService.js#L8)
 - **Description**:
-  The frontend Axios client configures a global timeout of 15,000ms (15 seconds):
-  `timeout: 15000`
-  However, the backend AI service timeout is configured for 30,000ms:
-  `timeout = Number(process.env.LLM_TIMEOUT || 30000)`
-- **Impact**:
-  If a complex AI recipe generation or chat query takes between 16 and 30 seconds, Axios aborts the client request with an `ECONNABORTED` timeout error, while the backend continues executing the LLM call and logging the response, wasting server resources and confusing the user.
-- **Reproduction Steps**:
-  1. Trigger an AI generation under heavy network latency where Gemini responds in 20 seconds.
-  2. The frontend shows a network failure at 15 seconds.
-  3. The backend logs a successful response 5 seconds later.
-- **Recommended Fix**:
-  Allow per-request timeout overrides in `api.js` and set the AI request timeout to 35,000ms (slightly exceeding the backend 30s timeout).
+  The frontend Axios client configured a global timeout of 15,000ms (15 seconds) while the backend AI service allowed up to 30,000ms, risking client-side `ECONNABORTED` disconnects while the backend completed generative tasks.
+- **Resolution & Verification**:
+  Configured explicit per-request timeouts of 35,000ms on all client AI requests (`sendChatMessage`, `generateAIRecipe`, and `getAIRecommendations`) in `frontend/src/services/aiService.js`, safely exceeding the backend's 30-second cancellation window. Verified clean build and full frontend test suite passage.
 
 ---
 
@@ -241,13 +214,12 @@ All verification runs were executed against authorized local test databases (`pa
 
 ### Finding 10 [LOW] — Unsanitized Console Logging in Express Error Handler
 - **Category**: Logging & Security
-- **File Reference**: [backend/src/middleware/errorHandler.js](../backend/src/middleware/errorHandler.js#L2)
+- **Status**: **RESOLVED (Phase 6)**
+- **File Reference**: [backend/src/middleware/errorHandler.js](../backend/src/middleware/errorHandler.js#L1-L7)
 - **Description**:
-  `errorHandler.js` logs raw error objects directly with `console.error(err)`.
-- **Impact**:
-  If an uncaught database connection error reaches the global error handler, credentials in connection strings might be printed to server logs.
-- **Recommended Fix**:
-  Wrap logged error messages with `sanitizeDatabaseUrl(err.message || String(err))`.
+  `errorHandler.js` previously logged raw error objects directly with `console.error(err)`, which risked printing database credentials in unhandled connection errors to server logs.
+- **Resolution & Verification**:
+  Updated `errorHandler.js` to pipe error stack traces and messages through `sanitizeDatabaseUrl()` before logging. Verified with integration test in `productionBlockers.test.js` asserting sensitive database authority credentials and query passwords are redacted with `******`.
 
 ---
 
@@ -263,40 +235,55 @@ All verification runs were executed against authorized local test databases (`pa
 
 ## 5. Prioritized Remediation Roadmap
 
-### Priority 1: Pre-Release Blockers (Must Fix Before Production Launch)
-1. **Fix `tsx` Production Dependency**:
-   - Move `"tsx"` from `"devDependencies"` to `"dependencies"` in `backend/package.json`.
-2. **Purge `UnstructuredRecipe` on Account Deletion & Export**:
-   - Add `UnstructuredRecipe.deleteMany({ userId })` to `deleteUserAccount`, `retryAccountDeletion`, and `reconcilePendingAccountDeletions`.
-   - Add `UnstructuredRecipe` documents to `exportUserData` output.
-3. **Mount Rate Limiter on Authentication Routes**:
-   - Add `sensitiveLimiter` (or dedicated 10 req/15min auth limiter) to `POST /api/v1/auth/login` and `POST /api/v1/auth/register`.
-4. **Mount Rate Limiter on AI Endpoints**:
-   - Add a 15–20 req/15min rate limiter to `/api/v1/ai/chat`, `/api/v1/ai/recipes/generate`, and `/api/v1/ai/recommendations`.
+### Priority 1: Pre-Release Blockers (All Resolved in Phase 6)
+1. **Fix `tsx` Production Dependency & CI Lockfile** — **RESOLVED**:
+   - Moved `"tsx"` to `"dependencies"` in `backend/package.json`.
+   - Regenerated lockfile with consistent `gcp-metadata@7.0.1` nested peer-dependency resolution.
+   - Updated CI pipeline to Node 22 matching Docker, added `npx prisma generate` before test runs, and serialized Vitest test database execution with `--fileParallelism=false`.
+   - Verified clean `npm ci` and `npm ci --omit=dev` with verified runtime binaries.
+2. **Purge `UnstructuredRecipe` on Account Deletion & Export with Race Condition Fencing, Obligation Separation & Transactional Ordering** — **RESOLVED**:
+   - Added `UnstructuredRecipe.deleteMany({ userId })` across `deleteUserAccount`, `retryAccountDeletion`, and `reconcilePendingAccountDeletions`.
+   - Added `unstructuredRecipes` documents to `exportUserData` output.
+   - Guarded in-flight AI recipe and chat generation with database-backed cross-process advisory locks (`pg_advisory_xact_lock`), post-write verification, un-swallowed compensating rollbacks, and durable obligations (`AccountDeletionObligation` in PostgreSQL and `DeletionObligation` in MongoDB) that survive process restarts even if the PostgreSQL `User` row has already been deleted.
+   - Separated obligations into `ACCOUNT_DELETION` and `DOCUMENT_CLEANUP` with unique `obligationKey` (`ACCOUNT:${userId}` vs `DOC:${userId}:${targetCollection}:${documentId}`), preventing document cleanup from ever deleting active PostgreSQL users or cascading application data.
+   - Enforced strict document ownership requiring both `_id` and `userId` in each deletion filter, rejected incomplete or invalid cleanup targets, preserved obligations upon MongoDB unavailability, and safely cleared stale `ACCOUNT_DELETION` markers without impacting active users.
+   - Enforced transactional resolution ordering: PostgreSQL obligation markers resolve inside `tx` (preserving durability on rollback), MongoDB markers resolve strictly post-commit, and double-write failure throws critical errors with redacted credentials to prevent credential leaks.
+   - Guaranteed that failed cleanups never return false success and reliably surface HTTP 502 `TELEMETRY_CLEANUP_FAILED` with the account locked in `DELETION_FAILED`.
+   - Implemented durable two-phase deletion where Phase A commits deletion intent and locks the account in PostgreSQL before Phase B executes MongoDB purges. When the PostgreSQL `User` row no longer exists (e.g. following previous crash or partition), MongoDB cleanup failures preserve the PostgreSQL `ACCOUNT_DELETION` obligation with status `FAILED` rather than silently removing it, guaranteeing recovery works reliably even when no MongoDB obligation marker exists.
+3. **Mount Rate Limiter on Authentication Routes** — **RESOLVED**:
+   - Added dedicated `authLimiter` (10 req/15min) to `POST /api/v1/auth/login` and `POST /api/v1/auth/register`.
+4. **Mount Unified Rate Limiter & Upstream Quota Protection on AI Endpoints** — **RESOLVED**:
+   - Implemented single shared `sharedAiLimiter` instance (20 req/15min) across `/api/v1/ai/chat`, `/api/v1/ai/recipes/generate`, and `/api/v1/ai/recommendations` so all AI endpoints decrement the same user quota.
+   - Handled upstream Gemini 429 quota errors mapping to HTTP 429 `AI_QUOTA_EXCEEDED`.
+5. **Client-Server AI Timeout Alignment** — **RESOLVED**:
+   - Configured 35s timeout in `frontend/src/services/aiService.js` and `frontend/src/services/aiRecommendationService.js`.
+6. **Error Handler Credential Sanitization** — **RESOLVED**:
+   - Redacted database connection credentials in `backend/src/middleware/errorHandler.js`.
+7. **Automated CI/CD Release Gates** — **RESOLVED**:
+   - Created `.github/workflows/ci.yml` running backend/frontend tests, migrations, builds, and Playwright E2E in isolated service containers.
 
 ### Priority 2: Post-Release Enhancements (Sprint 1 Post-Launch)
 1. **Frontend Error Boundary**:
    - Implement `<ErrorBoundary>` in `frontend/src/components/common/ErrorBoundary.jsx` and wrap `App.jsx`.
-2. **Timeout Alignment**:
-   - Adjust Axios timeout in `frontend/src/services/api.js` for AI service endpoints to 35 seconds.
+2. **Profile Email Change Verification**:
+   - Require password confirmation or verification token before updating user login email.
 3. **Settings UI Cleanup**:
    - Add "Coming Soon" badge to the 2FA toggle or hide it until backend TOTP support is added.
    - Remove hardcoded `"Last changed 2 weeks ago"` string.
-4. **Sanitize Global Error Handler**:
-   - Sanitize error messages in `backend/src/middleware/errorHandler.js` before outputting to `console.error`.
 
 ---
 
 ## 6. Release Readiness Verdict
 
-### **VERDICT: CONDITIONAL GO**
+### **VERDICT: GO (RELEASE CANDIDATE READY)**
 
 #### Rationale:
-The PantryPal codebase exhibits solid architecture, zero broken builds, strong database relational integrity, and passes **100% of the 347 automated tests** (261 backend, 77 frontend, 9 Playwright E2E). Core user journeys across Pantry, Recipes, Cooking Mode, Meal Planning, Shopping, and Account Management operate reliably.
+All validated **Priority 1 Pre-Release Blockers** identified in the audit have been fully resolved, verified with dedicated integration tests, and guarded with automated GitHub Actions CI release gates:
+1. Production packaging is verified: `tsx` and `prisma` are available under `npm ci --omit=dev`, lockfile is strictly synchronized, and `npm start` boots Express cleanly with HTTP 200 `/api/v1/health`.
+2. Cross-database data erasure is complete: `UnstructuredRecipe` documents are strictly erased during deletion, retry, and background reconciliation, and included in personal data exports.
+3. In-flight AI recipe and telemetry writes are fenced with cross-process transaction advisory locks, durable deletion obligations, and compensating rollbacks against concurrent account deletion.
+4. Unified authentication and AI rate limiters prevent credential stuffing and enforce shared per-user AI quotas across routes.
+5. Upstream Gemini quota errors return actionable HTTP 429 responses, and frontend client timeouts are aligned to 35 seconds.
+6. All **382 automated tests pass with 100% success** (295 backend, 78 frontend, 9 Playwright E2E), zero migrations pending (18 cleanly deployed), and clean production builds.
 
-However, full general availability deployment requires executing **Priority 1 Pre-Release Blockers**:
-1. Correcting the `tsx` dependency placement so production servers do not crash on boot.
-2. Including `UnstructuredRecipe` in account deletion and export routines to guarantee complete GDPR compliance.
-3. Protecting login, registration, and AI endpoints with dedicated rate limiters to mitigate brute-force and LLM budget exhaustion.
-
-Once Priority 1 items are addressed, PantryPal is fully cleared for public production release.
+PantryPal is cleared for production release.

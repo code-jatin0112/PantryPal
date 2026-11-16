@@ -1,6 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import * as API_ENDPOINTS from '../constants/api';
 import { getErrorMessage, isNetworkError, isAuthError } from '../utils/errorHandler';
+import api from '../services/api';
+import { getAIRecommendations } from '../services/aiRecommendationService';
 
 describe('Centralized API Services & Error Normalization Test Suite', () => {
   it('defines all centralized endpoint constants without hardcoded base URLs', () => {
@@ -30,5 +32,25 @@ describe('Centralized API Services & Error Normalization Test Suite', () => {
     };
     expect(isAuthError(backendError)).toBe(true);
     expect(getErrorMessage(backendError)).toBe('Invalid credentials provided.');
+  });
+
+  it('passes a 35,000ms timeout option to api.post in getAIRecommendations', async () => {
+    const postSpy = vi.spyOn(api, 'post').mockResolvedValueOnce({
+      data: {
+        data: {
+          recommendations: [{ id: 'rec-1', title: 'Pasta Primavera' }],
+        },
+      },
+    });
+
+    const result = await getAIRecommendations({ pantryId: 'p1' });
+
+    expect(postSpy).toHaveBeenCalledWith(
+      '/ai/recommendations',
+      { pantryId: 'p1' },
+      { timeout: 35000 }
+    );
+    expect(result).toEqual([{ id: 'rec-1', title: 'Pasta Primavera' }]);
+    postSpy.mockRestore();
   });
 });

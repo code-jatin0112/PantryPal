@@ -232,3 +232,21 @@ model CookingSession {
   @@index([recipeId])
   @@index([userId, status])
 }
+
+model AccountDeletionObligation {
+  id               String   @id @default(uuid())
+  obligationKey    String   @unique
+  type             String   @default("ACCOUNT_DELETION")
+  userId           String
+  targetCollection String   @default("ALL")
+  documentId       String?
+  status           String   @default("PENDING")
+  attempts         Int      @default(0)
+  lastError        String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([status])
+  @@index([userId])
+  @@index([type])
+}
