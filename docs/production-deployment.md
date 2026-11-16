@@ -110,7 +110,13 @@ When deploying a release that contains new Prisma migrations:
 2. **Execute Full Database Snapshot Backup**:
    Because Railway PostgreSQL is isolated in a private virtual network by default, choose a reachable backup path before modifying schema:
    - **In-Platform Volume Snapshot (Recommended)**:
-     In the Railway Dashboard → PostgreSQL Service → **Data** / **Backups** tab → click **Create Backup**.
+     > [!IMPORTANT]
+     > **Operator Configuration Required**: Railway volume backups are scheduled or manual on-demand snapshots — they are **not automatically continuous** on a newly provisioned service. Do not assume automated backups exist without verifying them in the Railway project.
+     
+     1. **Verify or Configure Backup Schedule**: In the Railway Dashboard → PostgreSQL Service → **Settings** → **Volume Backups**, ensure an automated backup schedule is configured (e.g. Daily schedule with 7-day retention).
+     2. **Create Pre-Release Snapshot**: Navigate to the **Backups** tab and click **Create Backup** to trigger an on-demand snapshot immediately before deployment.
+     3. **Confirm Usable Snapshot**: Verify that the snapshot completes successfully and is listed with a valid timestamp and status in the **Backups** list.
+     
      > [!NOTE]
      > This creates a platform-level persistent storage volume snapshot directly within Railway infrastructure without external network exposure. This backup is restored via the Railway Dashboard volume rollback workflow (Scenario C.1 in [Rollback Runbook](./rollback-runbook.md#scenario-c1-in-platform-railway-volume-snapshot-restore)), **not** via `pg_restore`.
    - **Manual Logical Backup via Workstation (`pg_dump`)**:
@@ -183,7 +189,7 @@ When deploying a release that contains new Prisma migrations:
 
 ### 4.3 Database Backup & Restore Plan
 - **PostgreSQL**:
-  - **In-Platform Volume Backups**: Automated continuous volume snapshots via Railway Managed PostgreSQL (restored via Railway Dashboard volume rollback, see [Rollback Runbook](./rollback-runbook.md#scenario-c1-in-platform-railway-volume-snapshot-restore)).
+  - **In-Platform Volume Backups**: Operator-configured scheduled or on-demand volume snapshots via Railway Managed PostgreSQL (configure schedule e.g. Daily at 02:00 UTC with 7-day retention in Service Settings; restored via Railway Dashboard staged volume deployment, see [Rollback Runbook](./rollback-runbook.md#scenario-c1-in-platform-railway-volume-snapshot-restore)).
   - **Logical Dump Archives**: Manual logical backups via `pg_dump -Fc` with TLS verification (restored via `pg_restore --exit-on-error` into a clean database, see [Rollback Runbook](./rollback-runbook.md#scenario-c2-logical-backup-restoration-via-pg_restore)).
 - **MongoDB Atlas**:
   - Automated continuous Cloud Backups with Point-in-Time Restore (PITR) enabled.

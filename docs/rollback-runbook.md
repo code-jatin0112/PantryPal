@@ -97,11 +97,40 @@ If schema alterations corrupted data, introduced breaking incompatibilities, or 
    - **Terminate Active PostgreSQL Connections**: Verify that all active connection pool sessions are closed and zero writes are in flight.
    - **Preserve Current State Before Restoring**:
      Before dropping tables or reverting disks, take an emergency logical dump of the *current* database state to safeguard delta transactions for post-incident recovery:
-     ```bash
-     export DATABASE_PUBLIC_URL="<value from Railway Dashboard>"
-     export PGSSLROOTCERT="$PWD/postgres-root.crt"
-     PGSSLMODE=verify-full pg_dump "$DATABASE_PUBLIC_URL" -Fc -f current_incident_state_$(date +%Y%m%d_%H%M%S).dump
-     ```
+     1. Temporarily enable **Public Networking** on the PostgreSQL service in the Railway Dashboard and copy `DATABASE_PUBLIC_URL`.
+     2. Export the root CA certificate and configure TLS verification:
+        ```bash
+        # Export Railway's internal PostgreSQL CA certificate
+        railway ssh --service PostgreSQL -- export-ssl-ca > postgres-root.crt
+        export PGSSLROOTCERT="$PWD/postgres-root.crt"
+        export DATABASE_PUBLIC_URL="<value from Railway Dashboard>"
+        ```
+     3. Execute emergency `pg_dump` with strict TLS:
+        ```bash
+        EMERGENCY_DUMP="current_incident_state_$(date +%Y%m%d_%H%M%S).dump"
+        PGSSLMODE=verify-full pg_dump "$DATABASE_PUBLIC_URL" -Fc -f "$EMERGENCY_DUMP"
+        DUMP_STATUS=$?
+        ```
+     4. **Immediate Public Network Closure (MANDATORY)**:
+        **Immediately disable Public Networking** on the PostgreSQL service in the Railway Dashboard now, regardless of whether `pg_dump` succeeded or failed.
+     5. **Verify Emergency Backup Usability Before Proceeding**:
+        ```bash
+        # Verify dump command exit status
+        if [ $DUMP_STATUS -ne 0 ]; then
+          echo "CRITICAL: Emergency database backup failed with exit code $DUMP_STATUS."
+          echo "DO NOT PROCEED with destructive restore. Escalate to Incident Commander."
+          exit 1
+        fi
+
+        # Verify archive readability and schema listing
+        if ! pg_restore --list "$EMERGENCY_DUMP" > /dev/null 2>&1; then
+          echo "CRITICAL: Emergency database archive is corrupted or unreadable."
+          echo "DO NOT PROCEED with destructive restore. Escalate to Incident Commander."
+          exit 1
+        fi
+        ```
+        > [!CAUTION]
+        > **DO NOT PROCEED with a destructive restore if the emergency backup cannot be verified with `pg_restore --list`**. Stop immediately and escalate for an explicit operator and stakeholder decision.
    - **Test in Isolation First**: Whenever feasible, test the restoration procedure against an isolated non-production database (`pantrypal_test`) before running in production.
 
 2. **Execute the Matching Restoration Procedure**:
@@ -110,9 +139,14 @@ If schema alterations corrupted data, introduced breaking incompatibilities, or 
    If you created an in-platform volume backup in Railway Dashboard (PostgreSQL Service → **Data** / **Backups** tab):
    1. Navigate to **Railway Dashboard** → **PostgreSQL Service** → **Backups** tab.
    2. Select the snapshot taken prior to deployment ($T_{\text{snapshot}}$).
-   3. Click **Restore Backup** and confirm the operation.
-   4. Railway halts the PostgreSQL container, replaces the underlying persistent disk volume with the snapshot, and starts PostgreSQL.
-   5. Monitor the PostgreSQL service logs until PostgreSQL reports `database system is ready to accept connections`.
+   3. Click **Restore**.
+   4. **Review Staged Volume Changes & Deploy**:
+      > [!IMPORTANT]
+      > Railway does **not** apply the restored volume immediately upon clicking Restore. Instead, Railway stages the volume restore as a pending configuration change.
+      
+      Review the staged volume changes (Railway preserves the previous volume disk as detached where available). Click **Deploy** to actually apply the staged changes and trigger deployment of the PostgreSQL container with the restored volume attached.
+   5. Monitor the PostgreSQL service deploy logs until PostgreSQL reports `database system is ready to accept connections`.
+   6. Verify restored database volume and schema state.
    *(Note: This is an infrastructure disk restore; it does not require `pg_restore` or public networking).*
 
    ##### Scenario C.2: Logical Backup Restoration via `pg_restore` (For Backups created via `pg_dump`)
@@ -176,19 +210,41 @@ If schema alterations corrupted data, introduced breaking incompatibilities, or 
        Verify HTTP 200 `{ status: "ready" }`. If rolling back to Phase 6 or earlier releases that lack `/health/readiness` (which return HTTP 404), rely on `/api/v1/health` and direct database verification instead.
      - Once health is confirmed, resume client traffic.
 
-6. **Post-Restore Delta Write Reconciliation**:
-   - Using the emergency dump created in Step 1 (`current_incident_state.dump`), extract user transactions committed between $T_{\text{snapshot}}$ and $T_{\text{incident}}$ (e.g. restoring into a temporary staging database to query `User`, `Recipe`, and `PantryItem` records created in that window).
-   - Reconcile or replay valid user records to minimize data loss impact.
+6. **Post-Restore Delta Write Reconciliation & Operator Sign-Off**:
+   > [!CAUTION]
+   > **NEVER automatically replay unreviewed transactions into production**. Schema changes or corrupted application state from the failed deployment could cause cascading data corruption. All reconciliation must be performed in an isolated non-production environment with human operator and product sign-off.
+   
+   **Safe Operational Sequence**:
+   1. **Stop Backend Traffic & Background Workers**: Confirmed in Step 1 (replicas = 0).
+   2. **Record Recovery Point Metadata**: Confirmed in Step 1 ($T_{\text{snapshot}}$, commit SHA, $T_{\text{incident}}$).
+   3. **Preserve Current Database State**: Confirmed in Step 1 (`current_incident_state.dump` verified with `pg_restore --list`).
+   4. **Restore Selected Backup**: Confirmed in Step 2 (Scenario C.1 Railway Volume Restore with Deploy, or Scenario C.2 `pg_restore --exit-on-error`).
+   5. **Verify Schema and Restored Data**: Confirmed in Step 3 (`prisma migrate status` against prior stable release).
+   6. **Assess Post-Snapshot Writes in Isolated Staging**:
+      Restore `current_incident_state.dump` into an isolated non-production staging database or local test database (`pantrypal_test`), never directly into production.
+      ```sql
+      -- Identify transactions created during the incident window
+      SELECT id, email, "createdAt" FROM "User" WHERE "createdAt" > '<T_SNAPSHOT>';
+      SELECT id, title, "userId", "createdAt" FROM "Recipe" WHERE "createdAt" > '<T_SNAPSHOT>';
+      SELECT id, name, "pantryId", "createdAt" FROM "PantryItem" WHERE "createdAt" > '<T_SNAPSHOT>';
+      ```
+   7. **Reconcile Recoverable Changes Safely**:
+      Filter out corrupt data or malformed inputs resulting from the release failure. Prepare explicit, validated SQL insert/upsert scripts for verified user accounts and entities.
+   8. **Obtain Operator Sign-Off on Potential Data Loss**:
+      Review reconciling vs un-reconcilable data with the incident commander and product owner. Obtain explicit written operator sign-off before proceeding.
+   9. **Resume Backend & Client Traffic**: Confirmed in Step 5 (scale backend service back to 1 replica on stable release).
+   10. **Complete Post-Rollback Smoke Tests**: Execute the validation checklist below and run [`docs/launch-smoke-tests.md`](./launch-smoke-tests.md).
 
 ---
 
 ## 4. Post-Rollback Validation Checklist
 
 After completing a rollback:
-- [ ] `GET /api/v1/health` returns `200` healthy (universal check across all versions).
-- [ ] `GET /api/v1/health/readiness` returns `200` (if rollback target supports Phase 7+ deep readiness probe).
-- [ ] `GET /api/v1/health/readiness` returns `200` with both `postgres: "connected"` and `mongodb: "connected"`.
+- [ ] `GET /api/v1/health` returns `200` healthy (universal liveness check across all versions).
+- [ ] Database connectivity verified directly (e.g. `SELECT 1` or `npx prisma migrate status` against prior stable release).
+- [ ] `GET /api/v1/health/readiness` returns `200` with both `postgres: "connected"` and `mongodb: "connected"` (ONLY if rollback target includes Phase 7+ deep readiness probe; expected 404 on Phase 6 or earlier).
 - [ ] Login and registration succeed with valid tokens issued.
 - [ ] Pantry inventory and recipe lists load correctly.
 - [ ] Zero unhandled 500 errors in Railway runtime logs.
+- [ ] Delta write reconciliation completed and operator sign-off documented.
 - [ ] Incident post-mortem is scheduled to analyze root cause before attempting re-deployment.
