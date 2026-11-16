@@ -124,10 +124,13 @@ export const recordDeletionObligation = async ({
   // CRITICAL DURABILITY GUARD:
   // If neither datastore persisted the obligation, throw immediately.
   // Never falsely claim durable recovery when persistence fails across all stores.
+  // Redact credentials in exception messages and logs to prevent credential leakage.
   if (!pgSuccess && !mongoSuccess) {
-    const errorMsg = `CRITICAL: Failed to durably persist deletion obligation to any datastore. PG error: ${pgError?.message}; Mongo error: ${mongoError?.message}`;
-    console.error(`[DataErasure] ${errorMsg}`);
-    throw new Error(errorMsg);
+    const pgErrMsg = pgError?.message ? sanitizeDatabaseUrl(pgError.message) : "none";
+    const mongoErrMsg = mongoError?.message ? sanitizeDatabaseUrl(mongoError.message) : "none";
+    const errorMsg = `CRITICAL: Failed to durably persist deletion obligation to any datastore. PG error: ${pgErrMsg}; Mongo error: ${mongoErrMsg}`;
+    console.error(`[DataErasure] ${sanitizeDatabaseUrl(errorMsg)}`);
+    throw new Error(sanitizeDatabaseUrl(errorMsg));
   }
 
   return { obligationKey, pgSuccess, mongoSuccess };
@@ -146,7 +149,12 @@ export const resolvePostgresDeletionObligation = async ({
   const pgClient = tx || prisma;
   try {
     const where = {};
-    if (obligationKey) {
+    if (obligationKey && userId && type === "ACCOUNT_DELETION") {
+      where.OR = [
+        { obligationKey },
+        { userId, type: "ACCOUNT_DELETION" },
+      ];
+    } else if (obligationKey) {
       where.obligationKey = obligationKey;
     } else if (userId) {
       where.userId = userId;
@@ -190,7 +198,12 @@ export const resolveMongoDeletionObligation = async ({
       const { DeletionObligation } = await import("../models/DeletionObligation.js");
       if (DeletionObligation) {
         const filter = {};
-        if (obligationKey) {
+        if (obligationKey && userId && type === "ACCOUNT_DELETION") {
+          filter.$or = [
+            { obligationKey },
+            { userId, type: "ACCOUNT_DELETION" },
+          ];
+        } else if (obligationKey) {
           filter.obligationKey = obligationKey;
         } else if (userId) {
           filter.userId = userId;
@@ -316,10 +329,10 @@ export const safePersistUserMongoRecord = async ({
         try {
           if (targetCollection === "UnstructuredRecipe") {
             const { UnstructuredRecipe } = await import("../models/UnstructuredRecipe.js");
-            await UnstructuredRecipe.deleteOne({ _id: createdDoc._id });
+            await UnstructuredRecipe.deleteOne({ _id: createdDoc._id, userId });
           } else if (targetCollection === "AiInteractionLog") {
             const { AiInteractionLog } = await import("../models/AiInteractionLog.js");
-            await AiInteractionLog.deleteOne({ _id: createdDoc._id });
+            await AiInteractionLog.deleteOne({ _id: createdDoc._id, userId });
           }
           console.log(`[DataErasure] Successfully rolled back doc ${createdDoc._id}`);
           return null;
@@ -327,7 +340,7 @@ export const safePersistUserMongoRecord = async ({
           // DO NOT SWALLOW: Record durable DOCUMENT_CLEANUP obligation and throw
           console.error(
             `[DataErasure] CRITICAL: Compensating rollback failed for doc ${createdDoc._id}:`,
-            rollbackErr.message
+            sanitizeDatabaseUrl(rollbackErr.message)
           );
           await recordDeletionObligation({
             type: "DOCUMENT_CLEANUP",
@@ -335,7 +348,7 @@ export const safePersistUserMongoRecord = async ({
             targetCollection,
             documentId: String(createdDoc._id),
             status: "FAILED",
-            error: `Compensating rollback failed: ${rollbackErr.message}`,
+            error: `Compensating rollback failed: ${sanitizeDatabaseUrl(rollbackErr.message)}`,
           });
           throw rollbackErr;
         }
