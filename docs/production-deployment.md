@@ -109,12 +109,27 @@ When deploying a release that contains new Prisma migrations:
 1. **Freeze Traffic / Announce Window**: Optional for backward-compatible migrations, mandatory for breaking schema changes.
 2. **Execute Full Database Snapshot Backup**:
    Because Railway PostgreSQL is isolated in a private virtual network by default, choose a reachable backup path before modifying schema:
-   - **In-Platform Snapshot (Recommended)**: In the Railway Dashboard → PostgreSQL Service → **Data** / **Backups** tab → click **Create Backup**. This captures a complete point-in-time snapshot directly within Railway infrastructure without external exposure.
-   - **Manual pg_dump via Workstation**: If taking a local offsite backup, temporarily enable **Public Networking** on the PostgreSQL service in Railway Dashboard, copy and export `DATABASE_PUBLIC_URL`, and run `pg_dump` with TLS:
-     ```bash
-     export DATABASE_PUBLIC_URL="<value from Railway Dashboard>"
-     PGSSLMODE=verify-full pg_dump "$DATABASE_PUBLIC_URL" -Fc -f backup_pre_release_$(date +%Y%m%d_%H%M%S).dump
-     ```
+   - **In-Platform Volume Snapshot (Recommended)**:
+     In the Railway Dashboard → PostgreSQL Service → **Data** / **Backups** tab → click **Create Backup**.
+     > [!NOTE]
+     > This creates a platform-level persistent storage volume snapshot directly within Railway infrastructure without external network exposure. This backup is restored via the Railway Dashboard volume rollback workflow (Scenario C.1 in [Rollback Runbook](./rollback-runbook.md#scenario-c1-in-platform-railway-volume-snapshot-restore)), **not** via `pg_restore`.
+   - **Manual Logical Backup via Workstation (`pg_dump`)**:
+     If taking a local offsite logical `.dump` archive:
+     1. Temporarily enable **Public Networking** on the PostgreSQL service in the Railway Dashboard, and copy `DATABASE_PUBLIC_URL`.
+     2. Export the Railway PostgreSQL CA root certificate to verify the proxy server's TLS identity:
+        ```bash
+        # Export Railway's internal PostgreSQL CA certificate
+        railway ssh --service PostgreSQL -- export-ssl-ca > postgres-root.crt
+        export PGSSLROOTCERT="$PWD/postgres-root.crt"
+        export DATABASE_PUBLIC_URL="<value from Railway Dashboard>"
+        ```
+     3. Execute `pg_dump` with strict TLS certificate and hostname verification (`verify-full`):
+        ```bash
+        PGSSLMODE=verify-full pg_dump "$DATABASE_PUBLIC_URL" -Fc -f backup_pre_release_$(date +%Y%m%d_%H%M%S).dump
+        ```
+     4. **Immediate Public Network Closure (MANDATORY)**:
+        **Immediately disable Public Networking** on the PostgreSQL service in the Railway Dashboard as soon as `pg_dump` finishes (or if it aborts/fails). Do not leave Public Networking open into step 3, especially when using private-network pre-deploy migrations.
+     5. *Certificate Hostname Note*: Current Railway PostgreSQL templates include the public proxy hostname (`*.proxy.rlwy.net`) in the server certificate SAN. If operating an older template where hostname verification fails, do **not** silently disable or weaken TLS verification; use the in-platform volume snapshot instead.
 3. **Execute Migrations via Verified Network Path**:
    > [!IMPORTANT]
    > Railway PostgreSQL is isolated inside the Railway private virtual network by default (`*.railway.internal`). Note that `railway run` executes commands on the **operator's local workstation** (pulling down environment variables) — it does **NOT** execute inside Railway's private network. Because `*.railway.internal` hostnames cannot resolve on local machines, running `railway run ...` locally against private hostnames will fail.
@@ -168,9 +183,8 @@ When deploying a release that contains new Prisma migrations:
 
 ### 4.3 Database Backup & Restore Plan
 - **PostgreSQL**:
-  - Automated continuous WAL archiving and daily snapshots via Railway Managed PostgreSQL or AWS RDS.
-  - Manual backup command: `pg_dump -Fc -Z 9 ...`
-  - Restore command: `pg_restore --clean --if-exists -d pantrypal ...`
+  - **In-Platform Volume Backups**: Automated continuous volume snapshots via Railway Managed PostgreSQL (restored via Railway Dashboard volume rollback, see [Rollback Runbook](./rollback-runbook.md#scenario-c1-in-platform-railway-volume-snapshot-restore)).
+  - **Logical Dump Archives**: Manual logical backups via `pg_dump -Fc` with TLS verification (restored via `pg_restore --exit-on-error` into a clean database, see [Rollback Runbook](./rollback-runbook.md#scenario-c2-logical-backup-restoration-via-pg_restore)).
 - **MongoDB Atlas**:
   - Automated continuous Cloud Backups with Point-in-Time Restore (PITR) enabled.
   - Manual snapshot export via Atlas UI or `mongodump --archive=backup.gz --gzip`.
