@@ -3,7 +3,11 @@
  * All backend endpoints are defined here — never hardcoded in service files.
  */
 
-export const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1';
+const rawApiUrl = (import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1').trim();
+const normalizedUrl = rawApiUrl.replace(/\/+$/, '');
+export const API_BASE = normalizedUrl.endsWith('/api/v1')
+  ? normalizedUrl
+  : `${normalizedUrl}/api/v1`;
 
 // ── Auth ──────────────────────────────────────────────────
 export const AUTH = {
