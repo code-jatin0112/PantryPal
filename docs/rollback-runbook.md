@@ -43,6 +43,10 @@ Railway maintains versioned Docker container images for each commit:
 5. Railway initiates zero-downtime container transition, starting the previous image and waiting for `/api/v1/health` liveness probe before routing ingress traffic.
 6. Verification:
    ```bash
+   # Universal liveness check across all versions:
+   curl -i https://<BACKEND_HOST>/api/v1/health
+
+   # Deep readiness probe (Phase 7+ releases only; expected 404 on Phase 6 or earlier):
    curl -i https://<BACKEND_HOST>/api/v1/health/readiness
    ```
 
@@ -82,12 +86,12 @@ If a migration fails due to lock timeout or syntax violation, Prisma locks the m
    ```bash
    DATABASE_URL="$MIGRATE_URL" npx prisma migrate resolve --rolled-back "<MIGRATION_NAME>"
    ```
-4. **Disable Public Networking**: Immediately turn off Public Networking on the PostgreSQL service in Railway once resolved.
+4. **Disable Public Networking (MANUAL OPERATOR ACTION REQUIRED)**: The operator must manually navigate to **Railway Dashboard** → **PostgreSQL Service** → **Settings** → **Networking** and toggle off **Public Networking** once resolved.
 
 #### Scenario C: Breaking Schema Change Requiring Full Database Restore
 If schema alterations corrupted data, introduced breaking incompatibilities, or irreversibly dropped columns:
 
-1. **Inhibit All Database Writes & Assess Recovery Point (MANDATORY)**:
+1. **Inhibit All Database Writes, Assess Recovery Point & Preserve Current State (MANDATORY)**:
    > [!CAUTION]
    > **DATA LOSS WARNING**: Restoring any historical database snapshot resets data to that snapshot's exact point-in-time ($T_{\text{snapshot}}$). Any user transactions, registrations, recipes, or inventory updates committed between $T_{\text{snapshot}}$ and the incident ($T_{\text{incident}}$) **will be permanently lost** from the active database.
    > Merely stopping writes prevents *further* corruption during restore, but does *not* preserve un-snapshotted intermediate data.
@@ -111,8 +115,8 @@ If schema alterations corrupted data, introduced breaking incompatibilities, or 
         PGSSLMODE=verify-full pg_dump "$DATABASE_PUBLIC_URL" -Fc -f "$EMERGENCY_DUMP"
         DUMP_STATUS=$?
         ```
-     4. **Immediate Public Network Closure (MANDATORY)**:
-        **Immediately disable Public Networking** on the PostgreSQL service in the Railway Dashboard now, regardless of whether `pg_dump` succeeded or failed.
+     4. **Immediate Public Network Closure (MANUAL OPERATOR ACTION REQUIRED)**:
+        The operator must manually navigate to **Railway Dashboard** → **PostgreSQL Service** → **Settings** → **Networking** and toggle off **Public Networking** immediately, regardless of whether `pg_dump` succeeded or failed. Disabling public networking is not automated by CLI scripts and must never be left enabled during restore.
      5. **Verify Emergency Backup Usability Before Proceeding**:
         ```bash
         # Verify dump command exit status
@@ -168,8 +172,8 @@ If schema alterations corrupted data, introduced breaking incompatibilities, or 
       PGSSLMODE=verify-full PGSSLROOTCERT="$PWD/postgres-root.crt" pg_restore --exit-on-error --clean --if-exists -h <PROXY_HOST> -p <PORT> -U postgres -d railway backup_pre_release_<TIMESTAMP>.dump
       ```
       Confirm `pg_restore` exits with status `0` before proceeding.
-   5. **Immediate Public Network Closure (MANDATORY)**:
-      **Immediately disable Public Networking** on the PostgreSQL service in the Railway Dashboard as soon as `pg_restore` finishes (or aborts). Do not leave Public Networking exposed.
+   5. **Immediate Public Network Closure (MANUAL OPERATOR ACTION REQUIRED)**:
+      The operator must manually navigate to **Railway Dashboard** → **PostgreSQL Service** → **Settings** → **Networking** and toggle off **Public Networking** immediately as soon as `pg_restore` finishes (or aborts). Disabling public networking is not automated by CLI scripts and must never be left exposed.
 
 3. **Verify Schema Integrity & Migrations Against Prior Stable Release**:
    > [!IMPORTANT]
@@ -189,62 +193,72 @@ If schema alterations corrupted data, introduced breaking incompatibilities, or 
 
    DATABASE_URL="$MIGRATE_URL" npx prisma migrate status
    ```
-   Once schema verification passes, disable Public Networking on the PostgreSQL service if external access is no longer required.
+   Once schema verification passes, the operator must manually navigate to the Railway Dashboard and toggle off Public Networking on the PostgreSQL service.
 
 4. **Restore MongoDB Atlas Snapshot (If Telemetry/Recipes Affected)**:
    - In MongoDB Atlas Console → **Clusters** → **Backup** → Select snapshot prior to deployment timestamp → Click **Restore**.
 
-5. **Restart Backend & Re-Verify Health Across Versions**:
-   - Redeploy or scale backend service back to 1 replica on the prior stable commit.
-   - **Version-Aware Health Verification**:
-     - **Base Liveness Check (All Releases)**:
-       ```bash
-       curl -i https://<BACKEND_HOST>/api/v1/health
-       ```
-       Verify HTTP 200 `{ status: "healthy" }`. This endpoint is universally supported across all historical and current versions.
-     - **Deep Readiness Probe (Phase 7+ Releases Only)**:
-       If the restored rollback target is a commit that includes the Phase 7 deep readiness probe:
-       ```bash
-       curl -i https://<BACKEND_HOST>/api/v1/health/readiness
-       ```
-       Verify HTTP 200 `{ status: "ready" }`. If rolling back to Phase 6 or earlier releases that lack `/health/readiness` (which return HTTP 404), rely on `/api/v1/health` and direct database verification instead.
-     - Once health is confirmed, resume client traffic.
-
-6. **Post-Restore Delta Write Reconciliation & Operator Sign-Off**:
+5. **Post-Restore Delta Write Reconciliation & Operator Sign-Off in Staging (MANDATORY BEFORE BACKEND RESTART)**:
    > [!CAUTION]
-   > **NEVER automatically replay unreviewed transactions into production**. Schema changes or corrupted application state from the failed deployment could cause cascading data corruption. All reconciliation must be performed in an isolated non-production environment with human operator and product sign-off.
+   > **NEVER automatically replay unreviewed transactions into production**. Schema changes or corrupted application state from the failed deployment could cause cascading data corruption. All reconciliation must be performed in an isolated non-production environment with human operator and product sign-off **before restarting the backend or accepting traffic**.
    
    **Safe Operational Sequence**:
-   1. **Stop Backend Traffic & Background Workers**: Confirmed in Step 1 (replicas = 0).
-   2. **Record Recovery Point Metadata**: Confirmed in Step 1 ($T_{\text{snapshot}}$, commit SHA, $T_{\text{incident}}$).
-   3. **Preserve Current Database State**: Confirmed in Step 1 (`current_incident_state.dump` verified with `pg_restore --list`).
-   4. **Restore Selected Backup**: Confirmed in Step 2 (Scenario C.1 Railway Volume Restore with Deploy, or Scenario C.2 `pg_restore --exit-on-error`).
-   5. **Verify Schema and Restored Data**: Confirmed in Step 3 (`prisma migrate status` against prior stable release).
-   6. **Assess Post-Snapshot Writes in Isolated Staging**:
+   1. **Confirm Backend Remains Halted**: Verify that backend service replicas remain at `0` and client traffic is completely blocked.
+   2. **Assess Post-Snapshot Writes in Isolated Staging**:
       Restore `current_incident_state.dump` into an isolated non-production staging database or local test database (`pantrypal_test`), never directly into production.
       ```sql
-      -- Identify transactions created during the incident window
+      -- Identify transactions created during the incident window in the isolated staging DB
       SELECT id, email, "createdAt" FROM "User" WHERE "createdAt" > '<T_SNAPSHOT>';
       SELECT id, title, "userId", "createdAt" FROM "Recipe" WHERE "createdAt" > '<T_SNAPSHOT>';
       SELECT id, name, "pantryId", "createdAt" FROM "PantryItem" WHERE "createdAt" > '<T_SNAPSHOT>';
       ```
-   7. **Reconcile Recoverable Changes Safely**:
+   3. **Reconcile Recoverable Changes Safely**:
       Filter out corrupt data or malformed inputs resulting from the release failure. Prepare explicit, validated SQL insert/upsert scripts for verified user accounts and entities.
-   8. **Obtain Operator Sign-Off on Potential Data Loss**:
-      Review reconciling vs un-reconcilable data with the incident commander and product owner. Obtain explicit written operator sign-off before proceeding.
-   9. **Resume Backend & Client Traffic**: Confirmed in Step 5 (scale backend service back to 1 replica on stable release).
-   10. **Complete Post-Rollback Smoke Tests**: Execute the validation checklist below and run [`docs/launch-smoke-tests.md`](./launch-smoke-tests.md).
+   4. **Obtain Operator & Product Owner Sign-Off on Potential Data Loss**:
+      Review reconciling vs un-reconcilable data with the incident commander and product owner. Obtain explicit written operator sign-off and stakeholder disposition before proceeding to backend restart.
+
+6. **Restart Backend Service in Isolation (Zero Public Traffic)**:
+   - Redeploy or scale the backend service back to 1 replica on the prior stable commit.
+   - Keep public ingress traffic blocked / DNS or load balancer paused while service initialization, database connectivity, and smoke tests are verified.
+
+7. **Verify Service Health, Database Connectivity & Smoke Tests Across Versions**:
+   - **Base Liveness Check (All Releases)**:
+     ```bash
+     curl -i https://<BACKEND_HOST>/api/v1/health
+     ```
+     Verify HTTP 200 `{ status: "healthy" }`. This endpoint is universally supported across all historical and current versions.
+   - **Direct Database Connectivity Verification**:
+     Verify database connectivity via internal logs or direct query check (e.g. `SELECT 1;`).
+   - **Deep Readiness Probe (Phase 7+ Releases Only)**:
+     If the restored rollback target is a commit that includes the Phase 7 deep readiness probe:
+     ```bash
+     curl -i https://<BACKEND_HOST>/api/v1/health/readiness
+     ```
+     Verify HTTP 200 `{ status: "ready" }` with `postgres: "connected"` and `mongodb: "connected"`. If rolling back to Phase 6 or earlier releases that lack `/health/readiness` (which return HTTP 404), do not treat 404 as an error; rely on `/api/v1/health` and direct database verification instead.
+   - **Execute Post-Rollback Smoke Tests in Isolation**:
+     Run targeted smoke tests (user authentication, pantry retrieval) in isolation to verify application functionality prior to public exposure.
+
+8. **Resume Public Client Traffic & Post-Incident Closeout**:
+   - Re-enable ingress / route public client traffic back to the restored backend service.
+   - Monitor live runtime logs in Railway and Vercel for zero unhandled 500 errors.
+   - Complete the full post-rollback validation checklist below and run [`docs/launch-smoke-tests.md`](./launch-smoke-tests.md).
+   - Schedule an incident post-mortem to analyze root cause before attempting re-deployment.
 
 ---
 
 ## 4. Post-Rollback Validation Checklist
 
 After completing a rollback:
+- [ ] Database restore completed and verified against prior stable schema (`prisma migrate status`).
+- [ ] Post-snapshot writes assessed in isolated staging, and delta reconciliation completed or explicitly dispositioned.
+- [ ] Incident commander and product owner sign-off documented prior to backend restart.
+- [ ] Backend restarted on prior stable release tag or commit in isolation.
 - [ ] `GET /api/v1/health` returns `200` healthy (universal liveness check across all versions).
-- [ ] Database connectivity verified directly (e.g. `SELECT 1` or `npx prisma migrate status` against prior stable release).
-- [ ] `GET /api/v1/health/readiness` returns `200` with both `postgres: "connected"` and `mongodb: "connected"` (ONLY if rollback target includes Phase 7+ deep readiness probe; expected 404 on Phase 6 or earlier).
+- [ ] Direct database connectivity verified (e.g. `SELECT 1` or query check).
+- [ ] `GET /api/v1/health/readiness` returns `200` with both `postgres: "connected"` and `mongodb: "connected"` (CONDITIONALLY REQUIRED ONLY for Phase 7+ rollback targets; expected 404 on Phase 6 or earlier).
 - [ ] Login and registration succeed with valid tokens issued.
 - [ ] Pantry inventory and recipe lists load correctly.
+- [ ] Public client traffic resumed only after health checks and smoke tests pass.
 - [ ] Zero unhandled 500 errors in Railway runtime logs.
-- [ ] Delta write reconciliation completed and operator sign-off documented.
-- [ ] Incident post-mortem is scheduled to analyze root cause before attempting re-deployment.
+- [ ] Temporary public networking on PostgreSQL verified disabled (manual operator confirmation).
+- [ ] Incident post-mortem scheduled to analyze root cause before attempting re-deployment.

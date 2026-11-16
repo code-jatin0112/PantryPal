@@ -133,8 +133,8 @@ When deploying a release that contains new Prisma migrations:
         ```bash
         PGSSLMODE=verify-full pg_dump "$DATABASE_PUBLIC_URL" -Fc -f backup_pre_release_$(date +%Y%m%d_%H%M%S).dump
         ```
-     4. **Immediate Public Network Closure (MANDATORY)**:
-        **Immediately disable Public Networking** on the PostgreSQL service in the Railway Dashboard as soon as `pg_dump` finishes (or if it aborts/fails). Do not leave Public Networking open into step 3, especially when using private-network pre-deploy migrations.
+     4. **Immediate Public Network Closure (MANUAL OPERATOR ACTION REQUIRED)**:
+        The operator must manually navigate to **Railway Dashboard** → **PostgreSQL Service** → **Settings** → **Networking**, and toggle off **Public Networking** immediately after `pg_dump` finishes (or if it aborts/fails). Disabling public networking is not automated by CLI scripts and must never be left open into step 3, especially when using private-network pre-deploy migrations.
      5. *Certificate Hostname Note*: Current Railway PostgreSQL templates include the public proxy hostname (`*.proxy.rlwy.net`) in the server certificate SAN. If operating an older template where hostname verification fails, do **not** silently disable or weaken TLS verification; use the in-platform volume snapshot instead.
 3. **Execute Migrations via Verified Network Path**:
    > [!IMPORTANT]
@@ -184,7 +184,7 @@ When deploying a release that contains new Prisma migrations:
         # If applying manually:
         DATABASE_URL="$MIGRATE_URL" npm run db:migrate:deploy
         ```
-     5. **Disable Public Networking**: Immediately toggle off Public Networking on the PostgreSQL service in the Railway Dashboard once the maintenance task is complete to maintain zero-trust isolation.
+     5. **Manual Public Network Disablement (OPERATOR ACTION REQUIRED)**: The operator must manually navigate to the Railway Dashboard and toggle off Public Networking on the PostgreSQL service once the maintenance task is complete to maintain zero-trust isolation.
 4. **Deploy Updated Application Image**: Railway rolls out the new container version once migrations succeed.
 
 ### 4.3 Database Backup & Restore Plan
