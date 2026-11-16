@@ -17,7 +17,7 @@ All verification runs were executed against authorized local test databases (`pa
 
 | Test Suite | Files / Specs | Passed | Failed | Skipped | Duration | Execution Mode |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Backend Integration Suite** | 20 files | **302** | **0** | **0** | 54.36s | Vitest (`--fileParallelism=false`) |
+| **Backend Integration Suite** | 20 files | **306** | **0** | **0** | 54.31s | Vitest (`--fileParallelism=false`) |
 | **Frontend Component Suite** | 13 files | **78** | **0** | **0** | 5.00s | Vitest (`--run`) |
 | **Playwright End-to-End Suite** | 7 specs | **9** | **0** | **0** | 4.70s | Playwright Browser (Chromium) |
 | **Prisma Schema Validation** | 1 schema | **Valid** | **0** | **0** | 0.08s | `prisma validate` |
@@ -285,6 +285,6 @@ All validated **Priority 1 Pre-Release Blockers** identified in the audit have b
 3. In-flight AI recipe and telemetry writes are fenced with cross-process transaction advisory locks, durable deletion obligations, and compensating rollbacks against concurrent account deletion.
 4. Unified authentication and AI rate limiters prevent credential stuffing and enforce shared per-user AI quotas across routes.
 5. Upstream Gemini quota errors return actionable HTTP 429 responses, and frontend client timeouts are aligned to 35 seconds.
-6. All **389 automated tests pass with 100% success** (302 backend, 78 frontend, 9 Playwright E2E), zero migrations pending (18 cleanly deployed), and clean production builds.
+6. All **393 automated tests pass with 100% success** (306 backend, 78 frontend, 9 Playwright E2E), zero migrations pending (18 cleanly deployed), and clean production builds.
 
 PantryPal is cleared for production release.

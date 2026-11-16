@@ -13,8 +13,9 @@ COPY prisma ./prisma/
 # Install reproducible production dependencies (excluding devDependencies)
 RUN npm ci --omit=dev
 
-# Generate Prisma Client at build time for optimal runtime startup
-RUN npx prisma generate
+# Generate Prisma Client at build time using a command-scoped non-secret placeholder URL.
+# (Prisma v7 loads prisma.config.ts requiring env("DATABASE_URL"), but performs zero network I/O during generate)
+RUN DATABASE_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder?schema=public" npx prisma generate
 
 # Copy remaining application source code
 COPY . .
@@ -22,5 +23,5 @@ COPY . .
 # Expose standard port (Railway injects and overrides PORT at runtime)
 EXPOSE 3000
 
-# Start server (Prisma generate ensures client readiness if volume-mounted)
+# Start server using pre-generated runtime artifacts
 CMD ["npm", "start"]

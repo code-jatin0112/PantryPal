@@ -17,6 +17,10 @@ const getJwtSecret = () => {
   return secret;
 };
 
+export const assertJwtSecret = () => {
+  return getJwtSecret();
+};
+
 export const generateAccessToken = (userId, tokenVersion = 0) => {
   return jwt.sign(
     {

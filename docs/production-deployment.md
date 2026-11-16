@@ -62,8 +62,9 @@ Railway deployment is standardized on **`Dockerfile`** builder to eliminate buil
 2. **Select Repository**: Choose `code-jatin0112/PantryPal`.
 3. **Configure Service Settings**:
    - **Root Directory**: Set to `/backend`.
-   - **Builder**: Railway automatically detects `backend/railway.json` and uses `DOCKERFILE`.
-   - **Start Command**: `npm start` (which executes `prisma generate && tsx src/server.js`).
+   - **Config File Path**: Set explicitly to `/backend/railway.json` (under **Service Settings** → **General** → **Config File Path**). Do not rely on automatic discovery in monorepo structures.
+   - **Dockerfile Path**: Resolved via `backend/railway.json` as `Dockerfile` (or set explicitly to `/backend/Dockerfile`).
+   - **Start Command**: Managed by `CMD ["npm", "start"]` (executing `tsx src/server.js` with pre-generated artifacts).
    - **Healthcheck Path**: `/api/v1/health` (lightweight liveness probe).
    - **Healthcheck Timeout**: `30` seconds.
    - **Restart Policy**: `ON_FAILURE` (max 3 retries).
@@ -110,13 +111,29 @@ When deploying a release that contains new Prisma migrations:
    ```bash
    pg_dump -h <HOST> -U <USER> -d pantrypal -Fc -f backup_pre_release_$(date +%Y%m%d_%H%M%S).dump
    ```
-3. **Run Migrations via Railway One-Off Command**:
-   ```bash
-   railway run --service backend npm run db:migrate:deploy
-   ```
+3. **Run Migrations via Verified Network Path**:
+   > [!IMPORTANT]
+   > Railway PostgreSQL is isolated inside the Railway private network by default (`*.railway.internal`). A local `railway run` invoked on an operator workstation cannot resolve this internal hostname. Choose one of the verified execution options:
+
+   - **Option A (Preferred — Run Inside Railway Private Network)**:
+     Execute a one-off execution within Railway infrastructure where the internal DNS resolves:
+     ```bash
+     railway run --service backend npm run db:migrate:deploy
+     ```
+     *(Alternatively, configure `"preDeployCommand": "npx prisma migrate deploy"` in `backend/railway.json` to execute inside an ephemeral container before container cutover).*
+   - **Option B (Authorized External Connection with Mandatory TLS)**:
+     Enable **Public Networking** on the PostgreSQL service in the Railway dashboard, then run the command passing `DATABASE_PUBLIC_URL` with explicit SSL:
+     ```bash
+     DATABASE_URL="${DATABASE_PUBLIC_URL}?sslmode=require" npm run db:migrate:deploy
+     ```
 4. **Verify Applied Migrations**:
+   Confirm migration table state using the same reachable network path:
    ```bash
+   # Via Railway private network:
    railway run --service backend npm run db:migrate:status
+
+   # Or via authorized external connection:
+   DATABASE_URL="${DATABASE_PUBLIC_URL}?sslmode=require" npm run db:migrate:status
    ```
 5. **Deploy Updated Application Image**: Railway rolls out the new container version once migrations are verified.
 

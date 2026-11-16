@@ -1,10 +1,12 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import request from "supertest";
 import app from "../../src/app.js";
-import prisma from "../../src/config/database.js";
+import prisma, { pgPoolConfig } from "../../src/config/database.js";
 import { connectMongo, disconnectMongo } from "../../src/config/mongo.js";
 import mongoose from "mongoose";
-import { generateAccessToken } from "../../src/utils/token.js";
+import { generateAccessToken, assertJwtSecret } from "../../src/utils/token.js";
+import fs from "node:fs";
+import path from "node:path";
 
 describe("Phase 7 Production Launch Readiness Suite", () => {
   beforeAll(async () => {
@@ -94,26 +96,51 @@ describe("Phase 7 Production Launch Readiness Suite", () => {
   });
 
   describe("3. Production Security & Token Validation", () => {
-    it("rejects weak or placeholder JWT_SECRET in production mode", () => {
+    it("assertJwtSecret validates production secret before server startup", () => {
       const originalEnv = process.env.NODE_ENV;
       const originalSecret = process.env.JWT_SECRET;
 
       try {
         process.env.NODE_ENV = "production";
 
+        // Missing secret
+        delete process.env.JWT_SECRET;
+        expect(() => assertJwtSecret()).toThrow("JWT_SECRET is not configured");
+
         // Placeholder secret
+        process.env.JWT_SECRET = "your-super-secret-jwt-key-here-placeholder-32-chars";
+        expect(() => assertJwtSecret()).toThrow(/CRITICAL SECURITY CONFIGURATION ERROR/);
+
+        // Short secret (< 32 chars)
+        process.env.JWT_SECRET = "short-secret";
+        expect(() => assertJwtSecret()).toThrow(/CRITICAL SECURITY CONFIGURATION ERROR/);
+
+        // Valid secret
+        process.env.JWT_SECRET = "a-very-secure-randomly-generated-production-jwt-secret-key-32";
+        expect(assertJwtSecret()).toBe("a-very-secure-randomly-generated-production-jwt-secret-key-32");
+      } finally {
+        process.env.NODE_ENV = originalEnv;
+        process.env.JWT_SECRET = originalSecret;
+      }
+    });
+
+    it("rejects weak or placeholder JWT_SECRET in generateAccessToken during production mode", () => {
+      const originalEnv = process.env.NODE_ENV;
+      const originalSecret = process.env.JWT_SECRET;
+
+      try {
+        process.env.NODE_ENV = "production";
+
         process.env.JWT_SECRET = "your-super-secret-jwt-key-here-that-is-long-enough-32-chars";
         expect(() => generateAccessToken("test-user-id")).toThrow(
           /CRITICAL SECURITY CONFIGURATION ERROR/
         );
 
-        // Short secret (< 32 chars)
         process.env.JWT_SECRET = "too-short-secret";
         expect(() => generateAccessToken("test-user-id")).toThrow(
           /CRITICAL SECURITY CONFIGURATION ERROR/
         );
 
-        // Valid high-entropy 32+ char secret
         process.env.JWT_SECRET = "a-very-secure-randomly-generated-production-jwt-secret-key-32";
         const token = generateAccessToken("test-user-id");
         expect(token).toBeDefined();
@@ -122,6 +149,38 @@ describe("Phase 7 Production Launch Readiness Suite", () => {
         process.env.NODE_ENV = originalEnv;
         process.env.JWT_SECRET = originalSecret;
       }
+    });
+  });
+
+  describe("4. Database Pool Bounds & Driver Timeouts", () => {
+    it("configures bounded acquire, query, and statement timeouts on PostgreSQL pool", () => {
+      expect(pgPoolConfig.connectionTimeoutMillis).toBeGreaterThanOrEqual(1000);
+      expect(pgPoolConfig.connectionTimeoutMillis).toBeLessThanOrEqual(5000);
+      expect(pgPoolConfig.query_timeout).toBeGreaterThanOrEqual(1000);
+      expect(pgPoolConfig.query_timeout).toBeLessThanOrEqual(10000);
+      expect(pgPoolConfig.statement_timeout).toBeGreaterThanOrEqual(1000);
+      expect(pgPoolConfig.statement_timeout).toBeLessThanOrEqual(10000);
+      expect(pgPoolConfig.max).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  describe("5. Decoupled Startup & Docker Build Isolation", () => {
+    it("decouples database migrations from npm start in package.json", () => {
+      const pkgJsonPath = path.resolve(__dirname, "../../package.json");
+      const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, "utf-8"));
+
+      expect(pkg.scripts.start).toBe("tsx src/server.js");
+      expect(pkg.scripts.start).not.toContain("migrate deploy");
+      expect(pkg.scripts["db:migrate:deploy"]).toBe("prisma migrate deploy");
+      expect(pkg.scripts["db:migrate:status"]).toBe("prisma migrate status");
+    });
+
+    it("verifies Dockerfile scopes non-secret placeholder DATABASE_URL to build-time Prisma generation", () => {
+      const dockerfilePath = path.resolve(__dirname, "../../Dockerfile");
+      const dockerfile = fs.readFileSync(dockerfilePath, "utf-8");
+
+      expect(dockerfile).toContain("DATABASE_URL=\"postgresql://placeholder:placeholder@localhost:5432/placeholder?schema=public\" npx prisma generate");
+      expect(dockerfile).not.toContain("ARG DATABASE_URL");
     });
   });
 });

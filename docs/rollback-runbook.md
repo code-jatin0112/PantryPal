@@ -71,22 +71,31 @@ If a migration fails due to lock timeout or syntax violation, Prisma locks the m
 
 #### Scenario C: Breaking Schema Change Requiring Full Database Restore
 If data was corrupted or incompatible column drops were committed:
-1. **Halt Application Traffic**:
-   - Temporarily scale backend replicas to 0 or enable maintenance page in Vercel.
+1. **Stop Backend Service & Inhibit All Database Writes (MANDATORY)**:
+   > [!CAUTION]
+   > A frontend Vercel maintenance page alone is **insufficient** because direct API clients, background workers, and mobile/cached sessions bypass the frontend and continue issuing writes while `pg_restore --clean` drops and recreates schema objects.
+
+   - **Immediately scale backend service replicas to 0** in the Railway Dashboard (or stop the service container).
+   - Confirm active database connections are terminated and zero writes are in flight.
+   - Optionally display a maintenance notice on the Vercel frontend for user communication.
 2. **Restore PostgreSQL from Pre-Migration Backup Snapshot**:
    ```bash
    # Restore snapshot taken prior to deployment
    pg_restore --clean --if-exists -h <HOST> -U <USER> -d pantrypal backup_pre_release_<TIMESTAMP>.dump
    ```
-3. **Verify Schema Integrity**:
+3. **Verify Schema Integrity & Migrations**:
    ```bash
-   railway run --service backend npx prisma migrate status
+   DATABASE_URL="${DATABASE_PUBLIC_URL}?sslmode=require" npx prisma migrate status
    ```
-4. **Restore MongoDB Atlas Snapshot (If Applicable)**:
+4. **Restore MongoDB Atlas Snapshot (If Telemetry/Recipes Affected)**:
    - In MongoDB Atlas Console → **Clusters** → **Backup** → Select snapshot prior to deployment timestamp → Click **Restore**.
-5. **Restart Backend**:
-   - Scale backend back to 1 replica on the prior stable commit.
-   - Run readiness check to confirm connectivity.
+5. **Restart Backend & Re-Verify Health**:
+   - Redeploy or scale backend service back to 1 replica on the prior stable commit.
+   - Execute the readiness check:
+     ```bash
+     curl -i https://<BACKEND_HOST>/api/v1/health/readiness
+     ```
+   - Verify HTTP 200 `{ status: "ready" }` before resuming client traffic.
 
 ---
 

@@ -4,8 +4,14 @@ import prisma from "./config/database.js";
 import { connectMongo, disconnectMongo } from "./config/mongo.js";
 import { reconcilePendingAccountDeletions } from "./services/authService.js";
 import { sanitizeDatabaseUrl } from "./utils/testDatabaseGuard.js";
+import { assertJwtSecret } from "./utils/token.js";
 
 const PORT = process.env.PORT || 3000;
+
+// Validate JWT Secret before server starts listening in production
+if (process.env.NODE_ENV === "production") {
+  assertJwtSecret();
+}
 
 // Initialize NoSQL connection safely
 try {

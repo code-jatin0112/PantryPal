@@ -93,6 +93,12 @@ jobs:
           ./node_modules/.bin/prisma --version
           rm -rf /tmp/prod-smoke
 
+      - name: Production Docker Image Build Verification
+        working-directory: backend
+        run: |
+          docker build -t pantrypal-backend:test .
+          docker run --rm pantrypal-backend:test ls -la /app/src/generated/prisma
+
   frontend-release-gate:
     name: Frontend Release Gate (Component Tests & Build)
     runs-on: ubuntu-latest
