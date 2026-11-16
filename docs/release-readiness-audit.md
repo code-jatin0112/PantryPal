@@ -17,7 +17,7 @@ All verification runs were executed against authorized local test databases (`pa
 
 | Test Suite | Files / Specs | Passed | Failed | Skipped | Duration | Execution Mode |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Backend Integration Suite** | 19 files | **288** | **0** | **0** | 46.54s | Vitest (`--fileParallelism=false`) |
+| **Backend Integration Suite** | 19 files | **295** | **0** | **0** | 53.60s | Vitest (`--fileParallelism=false`) |
 | **Frontend Component Suite** | 13 files | **78** | **0** | **0** | 5.00s | Vitest (`--run`) |
 | **Playwright End-to-End Suite** | 7 specs | **9** | **0** | **0** | 4.70s | Playwright Browser (Chromium) |
 | **Prisma Schema Validation** | 1 schema | **Valid** | **0** | **0** | 0.08s | `prisma validate` |
@@ -249,6 +249,7 @@ All verification runs were executed against authorized local test databases (`pa
    - Enforced strict document ownership requiring both `_id` and `userId` in each deletion filter, rejected incomplete or invalid cleanup targets, preserved obligations upon MongoDB unavailability, and safely cleared stale `ACCOUNT_DELETION` markers without impacting active users.
    - Enforced transactional resolution ordering: PostgreSQL obligation markers resolve inside `tx` (preserving durability on rollback), MongoDB markers resolve strictly post-commit, and double-write failure throws critical errors with redacted credentials to prevent credential leaks.
    - Guaranteed that failed cleanups never return false success and reliably surface HTTP 502 `TELEMETRY_CLEANUP_FAILED` with the account locked in `DELETION_FAILED`.
+   - Implemented durable two-phase deletion where Phase A commits deletion intent and locks the account in PostgreSQL before Phase B executes MongoDB purges. When the PostgreSQL `User` row no longer exists (e.g. following previous crash or partition), MongoDB cleanup failures preserve the PostgreSQL `ACCOUNT_DELETION` obligation with status `FAILED` rather than silently removing it, guaranteeing recovery works reliably even when no MongoDB obligation marker exists.
 3. **Mount Rate Limiter on Authentication Routes** — **RESOLVED**:
    - Added dedicated `authLimiter` (10 req/15min) to `POST /api/v1/auth/login` and `POST /api/v1/auth/register`.
 4. **Mount Unified Rate Limiter & Upstream Quota Protection on AI Endpoints** — **RESOLVED**:
@@ -283,6 +284,6 @@ All validated **Priority 1 Pre-Release Blockers** identified in the audit have b
 3. In-flight AI recipe and telemetry writes are fenced with cross-process transaction advisory locks, durable deletion obligations, and compensating rollbacks against concurrent account deletion.
 4. Unified authentication and AI rate limiters prevent credential stuffing and enforce shared per-user AI quotas across routes.
 5. Upstream Gemini quota errors return actionable HTTP 429 responses, and frontend client timeouts are aligned to 35 seconds.
-6. All **381 automated tests pass with 100% success** (294 backend, 78 frontend, 9 Playwright E2E), zero migrations pending (18 cleanly deployed), and clean production builds.
+6. All **382 automated tests pass with 100% success** (295 backend, 78 frontend, 9 Playwright E2E), zero migrations pending (18 cleanly deployed), and clean production builds.
 
 PantryPal is cleared for production release.

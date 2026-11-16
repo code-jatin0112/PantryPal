@@ -319,14 +319,33 @@ export const finalizeAccountDeletion = async ({
       // If user does not exist in PostgreSQL (e.g. already deleted in previous run or orphan obligation)
       if (!freshUser) {
         // Idempotently purge any lingering MongoDB records
+        let orphanMongoSuccess = false;
         try {
           await cleanUserMongoData(userId);
+          orphanMongoSuccess = true;
         } catch (err) {
           console.warn(
-            `[Phase B] Lingering MongoDB cleanup for missing user ${userId}:`,
+            `[Phase B] Lingering MongoDB cleanup for missing user ${userId} failed:`,
             sanitizeDatabaseUrl(err.message)
           );
+          cleanupError = err;
         }
+
+        // If cleanup fails, preserve the PostgreSQL recovery obligation and return a failure.
+        // Do not mark finalized=true. Update obligation to FAILED.
+        if (!orphanMongoSuccess) {
+          await recordDeletionObligation({
+            tx,
+            type: "ACCOUNT_DELETION",
+            userId,
+            targetCollection: "ALL",
+            status: "FAILED",
+            error: sanitizeDatabaseUrl(cleanupError?.message || "MongoDB cleanup failed for missing user"),
+          });
+          return;
+        }
+
+        // Cleanup succeeded: resolve PostgreSQL obligation transactionally
         await resolvePostgresDeletionObligation({
           tx,
           obligationKey,

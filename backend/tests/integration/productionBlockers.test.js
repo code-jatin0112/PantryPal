@@ -1831,5 +1831,129 @@ describe("Phase 6 Production Release Blockers Suite", () => {
       expect(activeUser.isActive).toBe(true);
       expect(activeUser.deletionStatus).toBeNull();
     });
+
+    // 7. Missing PostgreSQL user: MongoDB failure preserves PostgreSQL obligation, and retry successfully finalizes when recovered
+    it("7. Missing PostgreSQL user: MongoDB failure preserves PostgreSQL obligation, and retry successfully finalizes when recovered", async () => {
+      const orphanUserId = `orphan-final-${Date.now()}`;
+
+      // 1. Missing PostgreSQL user
+      const pgUser = await prisma.user.findUnique({ where: { id: orphanUserId } });
+      expect(pgUser).toBeNull();
+
+      // Other unaffected active user setup
+      const otherPassword = "OtherUser123!";
+      const otherHashed = await hashPassword(otherPassword);
+      const otherUser = await prisma.user.create({
+        data: {
+          name: "Other Safe User",
+          email: `other-safe-${Date.now()}@example.com`,
+          password: otherHashed,
+        },
+      });
+
+      await AiInteractionLog.create({
+        userId: otherUser.id,
+        messagePrompt: "Safe user prompt",
+        intentDetected: "KITCHEN_ASSISTANT",
+        aiResponse: { reply: "Safe response" },
+        tokenUsage: 15,
+      });
+
+      await UnstructuredRecipe.create({
+        userId: otherUser.id,
+        sourcePrompt: "Safe user recipe prompt",
+        rawOutput: { title: "Safe Soup" },
+        conversionStatus: "NORMALIZED",
+      });
+
+      // 2. PostgreSQL ACCOUNT_DELETION obligation exists (with NO MongoDB marker)
+      const obligationKey = computeObligationKey({ type: "ACCOUNT_DELETION", userId: orphanUserId });
+      await prisma.accountDeletionObligation.create({
+        data: {
+          obligationKey,
+          type: "ACCOUNT_DELETION",
+          userId: orphanUserId,
+          targetCollection: "ALL",
+          status: "FAILED",
+          lastError: "Initial worker crashed",
+        },
+      });
+
+      // 3. MongoDB contains orphaned personal data
+      await AiInteractionLog.create({
+        userId: orphanUserId,
+        messagePrompt: "Orphaned AI prompt for missing user",
+        intentDetected: "KITCHEN_ASSISTANT",
+        aiResponse: { reply: "Orphaned data" },
+        tokenUsage: 45,
+      });
+
+      await UnstructuredRecipe.create({
+        userId: orphanUserId,
+        sourcePrompt: "Orphaned Recipe Prompt for missing user",
+        rawOutput: { title: "Orphaned Cake" },
+        conversionStatus: "NORMALIZED",
+      });
+
+      // 4. MongoDB cleanup fails or is unavailable
+      const mongoPurgeSpy1 = vi
+        .spyOn(AiInteractionLog, "deleteMany")
+        .mockRejectedValue(new Error("Simulated transient MongoDB network failure"));
+      const mongoPurgeSpy2 = vi
+        .spyOn(UnstructuredRecipe, "deleteMany")
+        .mockRejectedValue(new Error("Simulated transient MongoDB network failure"));
+
+      const failReconResult = await reconcilePendingAccountDeletions();
+      expect(failReconResult.failed).toBeGreaterThanOrEqual(1);
+
+      // 5. PostgreSQL obligation must survive
+      const survivingPgOb = await prisma.accountDeletionObligation.findFirst({
+        where: { userId: orphanUserId, type: "ACCOUNT_DELETION" },
+      });
+      expect(survivingPgOb).not.toBeNull();
+      expect(survivingPgOb.status).toBe("FAILED");
+      expect(survivingPgOb.lastError).toContain("Simulated transient MongoDB network failure");
+
+      // Verify orphaned data in MongoDB was NOT purged prematurely
+      const strandedLogs = await AiInteractionLog.find({ userId: orphanUserId });
+      expect(strandedLogs).toHaveLength(1);
+      const strandedRecipes = await UnstructuredRecipe.find({ userId: orphanUserId });
+      expect(strandedRecipes).toHaveLength(1);
+
+      // 6. MongoDB recovers and reconciliation retries
+      mongoPurgeSpy1.mockRestore();
+      mongoPurgeSpy2.mockRestore();
+
+      const recoverReconResult = await reconcilePendingAccountDeletions();
+      expect(recoverReconResult.reconciled).toBeGreaterThanOrEqual(1);
+
+      // 7. Orphan data is deleted and obligation resolved
+      const remainingLogs = await AiInteractionLog.find({ userId: orphanUserId });
+      expect(remainingLogs).toHaveLength(0);
+
+      const remainingRecipes = await UnstructuredRecipe.find({ userId: orphanUserId });
+      expect(remainingRecipes).toHaveLength(0);
+
+      const resolvedPgOb = await prisma.accountDeletionObligation.findFirst({
+        where: { userId: orphanUserId, type: "ACCOUNT_DELETION" },
+      });
+      expect(resolvedPgOb).toBeNull();
+
+      // 8. Other users remain unaffected
+      const safeUserAfter = await prisma.user.findUnique({ where: { id: otherUser.id } });
+      expect(safeUserAfter).not.toBeNull();
+      expect(safeUserAfter.isActive).toBe(true);
+
+      const safeUserLogs = await AiInteractionLog.find({ userId: otherUser.id });
+      expect(safeUserLogs).toHaveLength(1);
+
+      const safeUserRecipes = await UnstructuredRecipe.find({ userId: otherUser.id });
+      expect(safeUserRecipes).toHaveLength(1);
+
+      // Cleanup safe user
+      await prisma.user.deleteMany({ where: { id: otherUser.id } });
+      await AiInteractionLog.deleteMany({ userId: otherUser.id });
+      await UnstructuredRecipe.deleteMany({ userId: otherUser.id });
+    });
   });
 });
