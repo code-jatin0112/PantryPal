@@ -15,6 +15,7 @@ import {
   sanitizeDatabaseUrl,
 } from "../../src/utils/testDatabaseGuard.js";
 import {
+  loginUser,
   deleteUserAccount,
   retryAccountDeletion,
   reconcilePendingAccountDeletions,
@@ -1513,6 +1514,322 @@ describe("Phase 6 Production Release Blockers Suite", () => {
 
       pgSpy.mockRestore();
       if (mongoSpy) mongoSpy.mockRestore();
+    });
+  });
+
+  // ── 7. Two-Phase Account Deletion Consistency Suite ───────────
+  describe("7. Two-Phase Account Deletion Consistency Suite", () => {
+    let phaseUser = null;
+    let phasePassword = "PhasePassword123!";
+    let AiInteractionLog = null;
+    let UnstructuredRecipe = null;
+    let DeletionObligation = null;
+
+    beforeAll(async () => {
+      const logMod = await import("../../src/models/AiInteractionLog.js");
+      AiInteractionLog = logMod.AiInteractionLog;
+      const recMod = await import("../../src/models/UnstructuredRecipe.js");
+      UnstructuredRecipe = recMod.UnstructuredRecipe;
+      const obMod = await import("../../src/models/DeletionObligation.js");
+      DeletionObligation = obMod.DeletionObligation;
+    });
+
+    beforeEach(async () => {
+      await prisma.accountDeletionObligation.deleteMany();
+      if (DeletionObligation) {
+        await DeletionObligation.deleteMany();
+      }
+
+      const hashedPassword = await hashPassword(phasePassword);
+      phaseUser = await prisma.user.create({
+        data: {
+          name: "TwoPhase User",
+          email: `twophase-${Date.now()}@example.com`,
+          password: hashedPassword,
+        },
+      });
+
+      // Seed owned MongoDB records
+      await AiInteractionLog.create({
+        userId: phaseUser.id,
+        messagePrompt: "Two-phase AI prompt",
+        intentDetected: "KITCHEN_ASSISTANT",
+        aiResponse: { reply: "Helpful response" },
+        tokenUsage: 50,
+      });
+
+      await UnstructuredRecipe.create({
+        userId: phaseUser.id,
+        sourcePrompt: "Two-phase soup recipe",
+        rawOutput: { title: "Two Phase Soup" },
+        conversionStatus: "NORMALIZED",
+      });
+    });
+
+    afterEach(async () => {
+      if (phaseUser?.id) {
+        await prisma.user.deleteMany({ where: { id: phaseUser.id } });
+        await AiInteractionLog.deleteMany({ userId: phaseUser.id });
+        await UnstructuredRecipe.deleteMany({ userId: phaseUser.id });
+        await prisma.accountDeletionObligation.deleteMany({ where: { userId: phaseUser.id } });
+        if (DeletionObligation) {
+          await DeletionObligation.deleteMany({ userId: phaseUser.id });
+        }
+      }
+    });
+
+    // 1. Crash before Phase A commit: No MongoDB data removed.
+    it("1. Crash before Phase A commit: No MongoDB data removed", async () => {
+      let deleteErr = null;
+      try {
+        await deleteUserAccount({
+          userId: phaseUser.id,
+          password: phasePassword,
+          _hookBeforePhaseACommit: async () => {
+            throw new Error("Simulated database failure before Phase A commit");
+          },
+        });
+      } catch (err) {
+        deleteErr = err;
+      }
+
+      expect(deleteErr).not.toBeNull();
+      expect(deleteErr.message).toContain("Simulated database failure before Phase A commit");
+
+      // Verify PostgreSQL user remains active with deletionStatus null
+      const userInDb = await prisma.user.findUnique({ where: { id: phaseUser.id } });
+      expect(userInDb).not.toBeNull();
+      expect(userInDb.isActive).toBe(true);
+      expect(userInDb.deletionStatus).toBeNull();
+
+      // Verify ZERO MongoDB user data removed
+      const logs = await AiInteractionLog.find({ userId: phaseUser.id });
+      expect(logs).toHaveLength(1);
+      const recipes = await UnstructuredRecipe.find({ userId: phaseUser.id });
+      expect(recipes).toHaveLength(1);
+    });
+
+    // 2. Crash after Phase A commit: User remains locked and recovery can resume.
+    it("2. Crash after Phase A commit: User remains locked and recovery can resume", async () => {
+      let deleteErr = null;
+      try {
+        await deleteUserAccount({
+          userId: phaseUser.id,
+          password: phasePassword,
+          _hookAfterPhaseA: async () => {
+            throw new Error("Simulated server crash immediately after Phase A commit");
+          },
+        });
+      } catch (err) {
+        deleteErr = err;
+      }
+
+      expect(deleteErr).not.toBeNull();
+      expect(deleteErr.message).toContain("Simulated server crash immediately after Phase A commit");
+
+      // 1. User MUST be locked in PENDING_DELETION
+      const userInDb = await prisma.user.findUnique({ where: { id: phaseUser.id } });
+      expect(userInDb).not.toBeNull();
+      expect(userInDb.isActive).toBe(false);
+      expect(userInDb.deletionStatus).toBe("PENDING_DELETION");
+
+      // 2. Recovery obligation exists
+      const pgObligation = await prisma.accountDeletionObligation.findFirst({
+        where: { userId: phaseUser.id, type: "ACCOUNT_DELETION" },
+      });
+      expect(pgObligation).not.toBeNull();
+
+      // 3. User cannot log in (blocked with 403 ACCOUNT_PENDING_DELETION)
+      await expect(
+        loginUser({ email: phaseUser.email, password: phasePassword })
+      ).rejects.toMatchObject({
+        statusCode: 403,
+        code: "ACCOUNT_PENDING_DELETION",
+      });
+
+      // 4. Recovery can resume via retryAccountDeletion
+      const retryResult = await retryAccountDeletion({
+        email: phaseUser.email,
+        password: phasePassword,
+      });
+      expect(retryResult.status).toBe("COMPLETED");
+
+      // Verify user is permanently deleted and MongoDB data purged
+      const userAfterRetry = await prisma.user.findUnique({ where: { id: phaseUser.id } });
+      expect(userAfterRetry).toBeNull();
+
+      const remainingLogs = await AiInteractionLog.find({ userId: phaseUser.id });
+      expect(remainingLogs).toHaveLength(0);
+      const remainingRecipes = await UnstructuredRecipe.find({ userId: phaseUser.id });
+      expect(remainingRecipes).toHaveLength(0);
+    });
+
+    // 3. Crash after MongoDB purge but before PostgreSQL finalization: Pending state survives and worker finishes.
+    it("3. Crash after MongoDB purge but before PostgreSQL finalization: Pending state survives and worker finishes", async () => {
+      let deleteErr = null;
+      try {
+        await deleteUserAccount({
+          userId: phaseUser.id,
+          password: phasePassword,
+          _hookAfterMongoPurge: async () => {
+            throw new Error("Simulated crash right after MongoDB purge before PostgreSQL commit");
+          },
+        });
+      } catch (err) {
+        deleteErr = err;
+      }
+
+      expect(deleteErr).not.toBeNull();
+
+      // PostgreSQL user remains in PENDING_DELETION because Phase A committed earlier
+      const userSurviving = await prisma.user.findUnique({ where: { id: phaseUser.id } });
+      expect(userSurviving).not.toBeNull();
+      expect(userSurviving.isActive).toBe(false);
+      expect(userSurviving.deletionStatus).toBe("PENDING_DELETION");
+
+      // Background reconciliation runs: finishes Phase B idempotently
+      const reconResult = await reconcilePendingAccountDeletions();
+      expect(reconResult.reconciled).toBeGreaterThanOrEqual(1);
+
+      // User is permanently finalized
+      const userFinal = await prisma.user.findUnique({ where: { id: phaseUser.id } });
+      expect(userFinal).toBeNull();
+
+      const logsFinal = await AiInteractionLog.find({ userId: phaseUser.id });
+      expect(logsFinal).toHaveLength(0);
+    });
+
+    // 4. MongoDB unavailable or unconfigured: User is not permanently deleted and cleanup remains recoverable.
+    it("4. MongoDB unavailable or unconfigured: User is not permanently deleted and cleanup remains recoverable", async () => {
+      // Temporarily delete connection URIs to simulate MongoDB unconfigured
+      const origTestUri = process.env.MONGO_TEST_URI;
+      const origUri = process.env.MONGO_URI;
+      delete process.env.MONGO_TEST_URI;
+      delete process.env.MONGO_URI;
+
+      let deleteErr = null;
+      try {
+        await deleteUserAccount({
+          userId: phaseUser.id,
+          password: phasePassword,
+        });
+      } catch (err) {
+        deleteErr = err;
+      } finally {
+        process.env.MONGO_TEST_URI = origTestUri;
+        process.env.MONGO_URI = origUri;
+      }
+
+      // Fails closed with 502
+      expect(deleteErr).not.toBeNull();
+      expect(deleteErr.statusCode).toBe(502);
+      expect(deleteErr.code).toBe("TELEMETRY_CLEANUP_FAILED");
+
+      // PostgreSQL user NOT permanently deleted; retained with DELETION_FAILED
+      const userRetained = await prisma.user.findUnique({ where: { id: phaseUser.id } });
+      expect(userRetained).not.toBeNull();
+      expect(userRetained.deletionStatus).toBe("DELETION_FAILED");
+
+      // Obligation is retained with status FAILED
+      const obRetained = await prisma.accountDeletionObligation.findFirst({
+        where: { userId: phaseUser.id, type: "ACCOUNT_DELETION" },
+      });
+      expect(obRetained).not.toBeNull();
+      expect(obRetained.status).toBe("FAILED");
+
+      // Restore MongoDB and retry -> successfully finalizes
+      const retryResult = await retryAccountDeletion({
+        email: phaseUser.email,
+        password: phasePassword,
+      });
+      expect(retryResult.status).toBe("COMPLETED");
+
+      const userAfterFinal = await prisma.user.findUnique({ where: { id: phaseUser.id } });
+      expect(userAfterFinal).toBeNull();
+    });
+
+    // 5. Concurrent AI writes and deletion: No orphaned records.
+    it("5. Concurrent AI writes and deletion: No orphaned records", async () => {
+      let resolveAiGeneration;
+      const aiGenerationHold = new Promise((resolve) => {
+        resolveAiGeneration = resolve;
+      });
+
+      const aiSpy = vi
+        .spyOn(aiService, "generateStructuredAIResponse")
+        .mockImplementation(async () => {
+          await aiGenerationHold;
+          return {
+            reply: "Concurrent test reply",
+            intent: "KITCHEN_ASSISTANT",
+            relevantItems: [],
+            suggestedActions: [],
+            warnings: [],
+          };
+        });
+
+      // Start in-flight AI generation
+      const inFlightAiPromise = chatWithKitchenAssistant({
+        userId: phaseUser.id,
+        message: "Can I make pasta?",
+      });
+
+      // Give event loop time to initiate AI generation
+      await new Promise((r) => setTimeout(r, 50));
+
+      // Execute two-phase account deletion
+      const deletionResult = await deleteUserAccount({
+        userId: phaseUser.id,
+        password: phasePassword,
+      });
+      expect(deletionResult.message).toContain("deleted successfully");
+
+      // Release AI generation
+      resolveAiGeneration();
+      await inFlightAiPromise;
+
+      // Verify ZERO orphaned records
+      const logs = await AiInteractionLog.find({ userId: phaseUser.id });
+      expect(logs).toHaveLength(0);
+      const recipes = await UnstructuredRecipe.find({ userId: phaseUser.id });
+      expect(recipes).toHaveLength(0);
+
+      aiSpy.mockRestore();
+    });
+
+    // 6. Existing DOCUMENT_CLEANUP obligations: Preserve active users and tenant isolation.
+    it("6. Existing DOCUMENT_CLEANUP obligations: Preserve active users and tenant isolation", async () => {
+      // Create a document belonging to phaseUser
+      const userRecipe = await UnstructuredRecipe.create({
+        userId: phaseUser.id,
+        sourcePrompt: "User secret sauce",
+        rawOutput: { title: "Secret Sauce" },
+        conversionStatus: "NORMALIZED",
+      });
+
+      // Record a DOCUMENT_CLEANUP obligation
+      await recordDeletionObligation({
+        type: "DOCUMENT_CLEANUP",
+        userId: phaseUser.id,
+        targetCollection: "UnstructuredRecipe",
+        documentId: String(userRecipe._id),
+        status: "FAILED",
+        error: "Simulated earlier failure",
+      });
+
+      // Run background reconciliation
+      const reconResult = await reconcilePendingAccountDeletions();
+      expect(reconResult.reconciled).toBeGreaterThanOrEqual(1);
+
+      // Verify the targeted document is deleted
+      const docAfter = await UnstructuredRecipe.findById(userRecipe._id);
+      expect(docAfter).toBeNull();
+
+      // Verify active user is COMPLETELY PRESERVED and untouched
+      const activeUser = await prisma.user.findUnique({ where: { id: phaseUser.id } });
+      expect(activeUser).not.toBeNull();
+      expect(activeUser.isActive).toBe(true);
+      expect(activeUser.deletionStatus).toBeNull();
     });
   });
 });

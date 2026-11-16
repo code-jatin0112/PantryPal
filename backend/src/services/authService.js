@@ -12,13 +12,22 @@ import {
 } from "../utils/dataErasureCoordinator.js";
 
 export const cleanUserMongoData = async (targetUserId) => {
+  const mongoUri =
+    process.env.NODE_ENV === "test"
+      ? (process.env.MONGO_TEST_URI || null)
+      : process.env.MONGO_URI;
+
+  if (!mongoUri) {
+    throw new Error("MongoDB is unconfigured (missing connection URI)");
+  }
+
   const { default: mongoose } = await import("mongoose");
   const { connectMongo } = await import("../config/mongo.js");
   if (mongoose.connection.readyState === 0) {
     await connectMongo();
   }
   if (mongoose.connection.readyState !== 1) {
-    throw new Error("MongoDB connection unavailable");
+    throw new Error("MongoDB connection unavailable (readyState !== 1)");
   }
   const { AiInteractionLog } = await import("../models/AiInteractionLog.js");
   const { UnstructuredRecipe } = await import("../models/UnstructuredRecipe.js");
@@ -272,7 +281,183 @@ export const changeUserPassword = async ({
   };
 };
 
-export const deleteUserAccount = async ({ userId, password }) => {
+/**
+ * Phase B: Destructive cleanup and finalization of an account queued for deletion.
+ * Must only be invoked after Phase A has durably committed PENDING_DELETION intent.
+ *
+ * Guarantees:
+ * 1. Acquires the transaction-level advisory lock on userId across all processes.
+ * 2. Verifies committed deletion intent (freshUser.deletionStatus in ['PENDING_DELETION', 'DELETION_FAILED']).
+ * 3. Safely handles stale markers for active users (clearing markers without deleting user or application data).
+ * 4. Idempotently cleans up owned MongoDB records (cleanUserMongoData).
+ * 5. If MongoDB is unconfigured or unavailable, fails closed: retains user in DELETION_FAILED and obligation in FAILED.
+ * 6. Finalizes PostgreSQL User cascade deletion inside the same transaction.
+ * 7. Transactionally resolves PostgreSQL AccountDeletionObligation inside tx.
+ * 8. Resolves MongoDB DeletionObligation markers ONLY after the PostgreSQL transaction commits.
+ */
+export const finalizeAccountDeletion = async ({
+  userId,
+  _hookAfterMongoPurge = null,
+}) => {
+  const obligationKey = computeObligationKey({ type: "ACCOUNT_DELETION", userId });
+  let finalized = false;
+  let isStaleMarker = false;
+  let cleanupError = null;
+
+  await prisma.$transaction(
+    async (tx) => {
+      // 1. Acquire transaction-level advisory lock on userId across all processes
+      await tx.$executeRaw`
+        SELECT pg_advisory_xact_lock(hashtext(${ "pantrypal_user_lock" }), hashtext(${userId}))
+      `;
+
+      // 2. Query fresh user state from PostgreSQL inside lock
+      const [freshUser] = await tx.$queryRaw`
+        SELECT id, "isActive", "deletionStatus" FROM "User" WHERE id = ${userId}
+      `;
+
+      // If user does not exist in PostgreSQL (e.g. already deleted in previous run or orphan obligation)
+      if (!freshUser) {
+        // Idempotently purge any lingering MongoDB records
+        try {
+          await cleanUserMongoData(userId);
+        } catch (err) {
+          console.warn(
+            `[Phase B] Lingering MongoDB cleanup for missing user ${userId}:`,
+            sanitizeDatabaseUrl(err.message)
+          );
+        }
+        await resolvePostgresDeletionObligation({
+          tx,
+          obligationKey,
+          userId,
+          type: "ACCOUNT_DELETION",
+        });
+        finalized = true;
+        return;
+      }
+
+      // CRITICAL SAFETY GUARD:
+      // If user exists in PostgreSQL, they MUST have deletionStatus of PENDING_DELETION or DELETION_FAILED!
+      // If the user is active with no deletionStatus, NEVER DELETE!
+      if (
+        freshUser.deletionStatus !== "PENDING_DELETION" &&
+        freshUser.deletionStatus !== "DELETION_FAILED"
+      ) {
+        console.warn(
+          `[Phase B] SECURITY GUARD: User ${userId} exists and is active without deletionStatus. Skipping account deletion!`
+        );
+        // Clean up stale or spurious ACCOUNT_DELETION obligation marker in PostgreSQL inside tx
+        await resolvePostgresDeletionObligation({
+          tx,
+          obligationKey,
+          userId,
+          type: "ACCOUNT_DELETION",
+        });
+        isStaleMarker = true;
+        return;
+      }
+
+      // 3. Mark obligation IN_PROGRESS while executing finalization
+      await recordDeletionObligation({
+        tx,
+        type: "ACCOUNT_DELETION",
+        userId,
+        targetCollection: "ALL",
+        status: "IN_PROGRESS",
+      });
+
+      // 4. Perform idempotent cleanup of all owned MongoDB records
+      let mongoSuccess = false;
+      try {
+        await cleanUserMongoData(userId);
+        mongoSuccess = true;
+      } catch (mongoErr) {
+        console.error(
+          `[Phase B] MongoDB cleanup failed for user ${userId}:`,
+          sanitizeDatabaseUrl(mongoErr.message)
+        );
+        mongoSuccess = false;
+        cleanupError = mongoErr;
+      }
+
+      // 5. Fail closed if MongoDB is unconfigured or unavailable
+      if (!mongoSuccess) {
+        await tx.user.update({
+          where: { id: userId },
+          data: { deletionStatus: "DELETION_FAILED" },
+        });
+        await recordDeletionObligation({
+          tx,
+          type: "ACCOUNT_DELETION",
+          userId,
+          targetCollection: "ALL",
+          status: "FAILED",
+          error: sanitizeDatabaseUrl(cleanupError?.message || "MongoDB cleanup failed"),
+        });
+        return;
+      }
+
+      // Optional failure simulation hook after MongoDB purge before PostgreSQL finalization commit
+      if (_hookAfterMongoPurge) {
+        await _hookAfterMongoPurge(tx);
+      }
+
+      // 6. Finalize PostgreSQL account deletion transactionally
+      try {
+        await tx.user.delete({
+          where: { id: userId },
+        });
+      } catch (delErr) {
+        if (delErr.code !== "P2025") {
+          throw delErr;
+        }
+      }
+
+      // 7. Transactionally resolve PostgreSQL deletion obligation marker inside tx
+      await resolvePostgresDeletionObligation({
+        tx,
+        obligationKey,
+        userId,
+        type: "ACCOUNT_DELETION",
+      });
+
+      finalized = true;
+    },
+    { timeout: 30000 }
+  );
+
+  if (isStaleMarker) {
+    // Resolve MongoDB marker after PostgreSQL transaction commits
+    await resolveMongoDeletionObligation({
+      obligationKey,
+      userId,
+      type: "ACCOUNT_DELETION",
+    });
+    return { success: true, isStaleMarker: true };
+  }
+
+  if (!finalized) {
+    return { success: false, error: cleanupError };
+  }
+
+  // 8. Resolve MongoDB recovery markers only after PostgreSQL commit
+  await resolveMongoDeletionObligation({
+    obligationKey,
+    userId,
+    type: "ACCOUNT_DELETION",
+  });
+
+  return { success: true };
+};
+
+export const deleteUserAccount = async ({
+  userId,
+  password,
+  _hookBeforePhaseACommit = null,
+  _hookAfterPhaseA = null,
+  _hookAfterMongoPurge = null,
+}) => {
   const user = await prisma.user.findUnique({
     where: { id: userId },
   });
@@ -300,10 +485,9 @@ export const deleteUserAccount = async ({ userId, password }) => {
     );
   }
 
-  let deletionSuccess = false;
-  let cleanupError = null;
-  const obligationKey = computeObligationKey({ type: "ACCOUNT_DELETION", userId });
-
+  // ─────────────────────────────────────────────────────────────
+  // PHASE A — DURABLY COMMIT DELETION INTENT
+  // ─────────────────────────────────────────────────────────────
   await prisma.$transaction(
     async (tx) => {
       // 1. Acquire transaction-level advisory lock on userId across all processes
@@ -312,7 +496,7 @@ export const deleteUserAccount = async ({ userId, password }) => {
       `;
 
       // 2. Immediately transition to durable PENDING_DELETION state
-      // This locks out the account and revokes active sessions across all routes
+      // Locks out account and revokes active sessions across all routes
       await tx.user.update({
         where: { id: userId },
         data: {
@@ -322,8 +506,7 @@ export const deleteUserAccount = async ({ userId, password }) => {
         },
       });
 
-      // 3. Durably record deletion obligation before deleting user row
-      // Note: recorded transactionally in tx for PostgreSQL and in MongoDB
+      // 3. Durably persist ACCOUNT_DELETION recovery obligation
       await recordDeletionObligation({
         tx,
         type: "ACCOUNT_DELETION",
@@ -332,60 +515,34 @@ export const deleteUserAccount = async ({ userId, password }) => {
         status: "IN_PROGRESS",
       });
 
-      // 4. Clean up NoSQL telemetry and AI recipes (MongoDB)
-      let mongoSuccess = true;
-      if (process.env.MONGO_URI || process.env.MONGO_TEST_URI) {
-        try {
-          await cleanUserMongoData(userId);
-        } catch (mongoErr) {
-          console.error(
-            "Failed to delete MongoDB data during account deletion:",
-            sanitizeDatabaseUrl(mongoErr.message)
-          );
-          mongoSuccess = false;
-          cleanupError = mongoErr;
-        }
+      // Optional failure simulation hook before Phase A commit
+      if (_hookBeforePhaseACommit) {
+        await _hookBeforePhaseACommit(tx);
       }
-
-      if (!mongoSuccess) {
-        await tx.user.update({
-          where: { id: userId },
-          data: { deletionStatus: "DELETION_FAILED" },
-        });
-        await recordDeletionObligation({
-          tx,
-          type: "ACCOUNT_DELETION",
-          userId,
-          targetCollection: "ALL",
-          status: "FAILED",
-          error: cleanupError?.message || "MongoDB cleanup failed",
-        });
-        return;
-      }
-
-      // 5. PostgreSQL transactional cascade deletion
-      await tx.user.delete({
-        where: { id: userId },
-      });
-
-      // 6. Transactionally resolve PostgreSQL deletion obligation marker inside tx
-      // If tx rolls back, this deletion rolls back with it!
-      await resolvePostgresDeletionObligation({ tx, obligationKey, userId, type: "ACCOUNT_DELETION" });
-      deletionSuccess = true;
     },
     { timeout: 30000 }
   );
 
-  if (!deletionSuccess) {
+  // Optional failure simulation hook immediately after Phase A commit
+  if (_hookAfterPhaseA) {
+    await _hookAfterPhaseA();
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // PHASE B — CLEANUP AND FINALIZATION
+  // ─────────────────────────────────────────────────────────────
+  const result = await finalizeAccountDeletion({
+    userId,
+    _hookAfterMongoPurge,
+  });
+
+  if (!result.success) {
     throw new AppError(
       "Account entered pending deletion, but NoSQL telemetry cleanup failed. Please retry to complete deletion.",
       502,
       "TELEMETRY_CLEANUP_FAILED"
     );
   }
-
-  // 7. Resolve MongoDB deletion obligation markers ONLY AFTER PostgreSQL transaction commits!
-  await resolveMongoDeletionObligation({ obligationKey, userId, type: "ACCOUNT_DELETION" });
 
   return {
     message: "Account and associated data deleted successfully",
@@ -434,11 +591,6 @@ export const retryAccountDeletion = async ({ email, password, userId }) => {
   // The endpoint must ONLY finalize accounts whose deletionStatus is PENDING_DELETION or DELETION_FAILED.
   const allowedDeletionStatuses = ["PENDING_DELETION", "DELETION_FAILED"];
   if (!allowedDeletionStatuses.includes(user.deletionStatus)) {
-    // For a normal active account:
-    // - Do not change isActive.
-    // - Do not change tokenVersion.
-    // - Do not delete any data.
-    // - Return an appropriate non-success response.
     throw new AppError(
       "Account is not scheduled for deletion recovery. Normal accounts cannot be finalized via recovery.",
       400,
@@ -446,85 +598,18 @@ export const retryAccountDeletion = async ({ email, password, userId }) => {
     );
   }
 
-  let retrySuccess = false;
-  let cleanupError = null;
-  const obligationKey = computeObligationKey({ type: "ACCOUNT_DELETION", userId: user.id });
+  // ─────────────────────────────────────────────────────────────
+  // PHASE B — CLEANUP AND FINALIZATION (RESUMED)
+  // ─────────────────────────────────────────────────────────────
+  const result = await finalizeAccountDeletion({ userId: user.id });
 
-  await prisma.$transaction(
-    async (tx) => {
-      // 1. Acquire transaction-level advisory lock
-      await tx.$executeRaw`
-        SELECT pg_advisory_xact_lock(hashtext(${ "pantrypal_user_lock" }), hashtext(${user.id}))
-      `;
-
-      // 2. Re-verify inside lock
-      const [freshUser] = await tx.$queryRaw`
-        SELECT id, "deletionStatus" FROM "User" WHERE id = ${user.id}
-      `;
-      if (!freshUser || !allowedDeletionStatuses.includes(freshUser.deletionStatus)) {
-        retrySuccess = true;
-        return;
-      }
-
-      // 3. Mark obligation IN_PROGRESS
-      await recordDeletionObligation({
-        tx,
-        type: "ACCOUNT_DELETION",
-        userId: user.id,
-        targetCollection: "ALL",
-        status: "IN_PROGRESS",
-      });
-
-      // 4. Attempt NoSQL cleanup
-      let mongoSuccess = true;
-      if (process.env.MONGO_URI || process.env.MONGO_TEST_URI) {
-        try {
-          await cleanUserMongoData(user.id);
-        } catch (err) {
-          console.warn("MongoDB retry cleanup failed:", sanitizeDatabaseUrl(err.message));
-          mongoSuccess = false;
-          cleanupError = err;
-        }
-      }
-
-      if (!mongoSuccess) {
-        await tx.user.update({
-          where: { id: user.id },
-          data: { deletionStatus: "DELETION_FAILED" },
-        });
-        await recordDeletionObligation({
-          tx,
-          type: "ACCOUNT_DELETION",
-          userId: user.id,
-          targetCollection: "ALL",
-          status: "FAILED",
-          error: cleanupError?.message || "MongoDB cleanup failed during retry",
-        });
-        return;
-      }
-
-      // 5. PostgreSQL transactional cascade deletion
-      await tx.user.delete({
-        where: { id: user.id },
-      });
-
-      // 6. Transactionally resolve PostgreSQL deletion obligation inside tx
-      await resolvePostgresDeletionObligation({ tx, obligationKey, userId: user.id, type: "ACCOUNT_DELETION" });
-      retrySuccess = true;
-    },
-    { timeout: 30000 }
-  );
-
-  if (!retrySuccess) {
+  if (!result.success) {
     throw new AppError(
       "Telemetry cleanup failed during retry. Account remains locked in deletion state. Please retry or wait for background recovery.",
       502,
       "TELEMETRY_CLEANUP_FAILED"
     );
   }
-
-  // 7. Resolve MongoDB deletion obligation markers ONLY AFTER PostgreSQL transaction commits!
-  await resolveMongoDeletionObligation({ obligationKey, userId: user.id, type: "ACCOUNT_DELETION" });
 
   return {
     status: "COMPLETED",
@@ -800,122 +885,21 @@ export const reconcilePendingAccountDeletions = async () => {
     }
 
     for (const targetUserId of candidateAccountUserIds) {
-      const obligationKey = computeObligationKey({ type: "ACCOUNT_DELETION", userId: targetUserId });
       try {
-        let accountFinalized = false;
-        let isStaleMarker = false;
-        let cleanupErr = null;
-
-        await prisma.$transaction(
-          async (tx) => {
-            // Acquire transaction-level advisory lock
-            await tx.$executeRaw`
-              SELECT pg_advisory_xact_lock(hashtext(${ "pantrypal_user_lock" }), hashtext(${targetUserId}))
-            `;
-
-            // Check if user exists in PostgreSQL
-            const [freshUser] = await tx.$queryRaw`
-              SELECT id, "isActive", "deletionStatus" FROM "User" WHERE id = ${targetUserId}
-            `;
-
-            // CRITICAL SAFETY GUARD:
-            // If the user exists in PostgreSQL, they MUST have deletionStatus of PENDING_DELETION or DELETION_FAILED!
-            // If the user is active with no deletionStatus, NEVER DELETE!
-            if (freshUser && freshUser.deletionStatus !== "PENDING_DELETION" && freshUser.deletionStatus !== "DELETION_FAILED") {
-              console.warn(
-                `[Reconciliation] SECURITY GUARD: User ${targetUserId} exists and is active without deletionStatus. Skipping account deletion!`
-              );
-              // Clean up stale or spurious ACCOUNT_DELETION obligation marker in PostgreSQL transactionally inside tx
-              await resolvePostgresDeletionObligation({
-                tx,
-                obligationKey,
-                userId: targetUserId,
-                type: "ACCOUNT_DELETION",
-              });
-              isStaleMarker = true;
-              return;
-            }
-
-            // Clean up all MongoDB data for this account
-            let mongoSuccess = true;
-            if (process.env.MONGO_URI || process.env.MONGO_TEST_URI) {
-              try {
-                await cleanUserMongoData(targetUserId);
-              } catch (err) {
-                console.warn(
-                  `[Reconciliation] MongoDB cleanup failed for user ${targetUserId}:`,
-                  sanitizeDatabaseUrl(err.message)
-                );
-                mongoSuccess = false;
-                cleanupErr = err;
-              }
-            }
-
-            if (mongoSuccess) {
-              // Delete PostgreSQL User if still present
-              if (freshUser) {
-                try {
-                  await tx.user.delete({ where: { id: targetUserId } });
-                } catch (delErr) {
-                  if (delErr.code !== "P2025") {
-                    throw delErr;
-                  }
-                }
-              }
-
-              // Resolve PostgreSQL account deletion obligation marker TRANSACTIONALLY
-              await resolvePostgresDeletionObligation({
-                tx,
-                obligationKey,
-                userId: targetUserId,
-                type: "ACCOUNT_DELETION",
-              });
-              accountFinalized = true;
-            } else {
-              if (freshUser) {
-                await tx.user.update({
-                  where: { id: targetUserId },
-                  data: { deletionStatus: "DELETION_FAILED" },
-                });
-              }
-              await recordDeletionObligation({
-                tx,
-                type: "ACCOUNT_DELETION",
-                userId: targetUserId,
-                targetCollection: "ALL",
-                status: "FAILED",
-                error: sanitizeDatabaseUrl(cleanupErr?.message || "Reconciliation MongoDB cleanup failed"),
-              });
-              failed++;
-            }
-          },
-          { timeout: 30000 }
-        );
-
-        if (isStaleMarker) {
-          // Resolve the corresponding MongoDB marker ONLY AFTER the PostgreSQL transaction commits!
-          // This prevents repeated rediscovery of stale markers on subsequent reconciliation runs.
-          await resolveMongoDeletionObligation({
-            obligationKey,
-            userId: targetUserId,
-            type: "ACCOUNT_DELETION",
-          });
-          console.log(
-            `[Reconciliation] Safely cleared stale ACCOUNT_DELETION marker for active user ${targetUserId} across PostgreSQL and MongoDB`
-          );
+        const result = await finalizeAccountDeletion({ userId: targetUserId });
+        if (result.success) {
           reconciled++;
-          continue;
-        }
-
-        if (accountFinalized) {
-          // Resolve MongoDB account deletion markers ONLY AFTER transaction commits!
-          await resolveMongoDeletionObligation({
-            obligationKey,
-            userId: targetUserId,
-            type: "ACCOUNT_DELETION",
-          });
-          console.log(`[Reconciliation] Successfully finalized account deletion for user ${targetUserId}`);
-          reconciled++;
+          if (result.isStaleMarker) {
+            console.log(
+              `[Reconciliation] Safely cleared stale ACCOUNT_DELETION marker for active user ${targetUserId} across PostgreSQL and MongoDB`
+            );
+          } else {
+            console.log(
+              `[Reconciliation] Successfully finalized account deletion for user ${targetUserId}`
+            );
+          }
+        } else {
+          failed++;
         }
       } catch (userErr) {
         console.error(
