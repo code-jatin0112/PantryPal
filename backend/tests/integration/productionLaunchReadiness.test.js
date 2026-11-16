@@ -182,5 +182,19 @@ describe("Phase 7 Production Launch Readiness Suite", () => {
       expect(dockerfile).toContain("DATABASE_URL=\"postgresql://placeholder:placeholder@localhost:5432/placeholder?schema=public\" npx prisma generate");
       expect(dockerfile).not.toContain("ARG DATABASE_URL");
     });
+
+    it("verifies .dockerignore excludes host Prisma client to prevent build context clobbering", () => {
+      const dockerignorePath = path.resolve(__dirname, "../../.dockerignore");
+      const dockerignore = fs.readFileSync(dockerignorePath, "utf-8");
+
+      expect(dockerignore).toContain("src/generated/prisma");
+    });
+
+    it("verifies railway.json configures verified preDeployCommand for private network migrations", () => {
+      const railwayJsonPath = path.resolve(__dirname, "../../railway.json");
+      const railwayConfig = JSON.parse(fs.readFileSync(railwayJsonPath, "utf-8"));
+
+      expect(railwayConfig.deploy.preDeployCommand).toBe("npm run db:migrate:deploy");
+    });
   });
 });

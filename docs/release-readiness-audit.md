@@ -17,7 +17,7 @@ All verification runs were executed against authorized local test databases (`pa
 
 | Test Suite | Files / Specs | Passed | Failed | Skipped | Duration | Execution Mode |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Backend Integration Suite** | 20 files | **306** | **0** | **0** | 54.31s | Vitest (`--fileParallelism=false`) |
+| **Backend Integration Suite** | 20 files | **308** | **0** | **0** | 54.02s | Vitest (`--fileParallelism=false`) |
 | **Frontend Component Suite** | 13 files | **78** | **0** | **0** | 5.00s | Vitest (`--run`) |
 | **Playwright End-to-End Suite** | 7 specs | **9** | **0** | **0** | 4.70s | Playwright Browser (Chromium) |
 | **Prisma Schema Validation** | 1 schema | **Valid** | **0** | **0** | 0.08s | `prisma validate` |

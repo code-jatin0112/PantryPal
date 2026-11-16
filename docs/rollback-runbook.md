@@ -60,14 +60,28 @@ If the migration added nullable columns, new tables, or new indexes:
 
 #### Scenario B: The Migration Failed Mid-Execution
 If a migration fails due to lock timeout or syntax violation, Prisma locks the migration status in `_prisma_migrations`:
-1. Check migration state:
+1. **Enable Accessible Connection**:
+   Temporarily enable **Public Networking** on the PostgreSQL service in the Railway Dashboard, copy `DATABASE_PUBLIC_URL`, and export it in your terminal (see [Production Deployment Guide](file:///Users/jatinkashyap/PantryPal/docs/production-deployment.md#42-safe-production-migration-workflow)):
    ```bash
-   railway run --service backend npx prisma migrate status
+   export DATABASE_PUBLIC_URL="<value copied from Railway Dashboard>"
+
+   # Safely append sslmode=require handling existing query params
+   if [[ "$DATABASE_PUBLIC_URL" == *"?"* ]]; then
+     MIGRATE_URL="${DATABASE_PUBLIC_URL}&sslmode=require"
+   else
+     MIGRATE_URL="${DATABASE_PUBLIC_URL}?sslmode=require"
+   fi
    ```
-2. Mark the failed migration as rolled back in Prisma metadata once manually reverted:
+2. **Check Migration State**:
    ```bash
-   railway run --service backend npx prisma migrate resolve --rolled-back "<MIGRATION_NAME>"
+   DATABASE_URL="$MIGRATE_URL" npx prisma migrate status
    ```
+3. **Mark Failed Migration as Rolled Back**:
+   Once manually reverted in the database schema:
+   ```bash
+   DATABASE_URL="$MIGRATE_URL" npx prisma migrate resolve --rolled-back "<MIGRATION_NAME>"
+   ```
+4. **Disable Public Networking**: Immediately turn off Public Networking on the PostgreSQL service in Railway once resolved.
 
 #### Scenario C: Breaking Schema Change Requiring Full Database Restore
 If data was corrupted or incompatible column drops were committed:
@@ -79,14 +93,24 @@ If data was corrupted or incompatible column drops were committed:
    - Confirm active database connections are terminated and zero writes are in flight.
    - Optionally display a maintenance notice on the Vercel frontend for user communication.
 2. **Restore PostgreSQL from Pre-Migration Backup Snapshot**:
+   Enable Public Networking on PostgreSQL to allow the external restore connection:
    ```bash
    # Restore snapshot taken prior to deployment
-   pg_restore --clean --if-exists -h <HOST> -U <USER> -d pantrypal backup_pre_release_<TIMESTAMP>.dump
+   pg_restore --clean --if-exists -h <PROXY_HOST> -p <PORT> -U postgres -d railway backup_pre_release_<TIMESTAMP>.dump
    ```
-3. **Verify Schema Integrity & Migrations**:
+3. **Verify Schema Integrity & Migrations (Accessible Connection Path)**:
+   > [!IMPORTANT]
+   > Ensure Public Networking is enabled on the PostgreSQL service in the Railway Dashboard and `DATABASE_PUBLIC_URL` is exported in the local shell (refer to [Production Deployment Guide](file:///Users/jatinkashyap/PantryPal/docs/production-deployment.md#42-safe-production-migration-workflow) for setup details):
    ```bash
-   DATABASE_URL="${DATABASE_PUBLIC_URL}?sslmode=require" npx prisma migrate status
+   if [[ "$DATABASE_PUBLIC_URL" == *"?"* ]]; then
+     MIGRATE_URL="${DATABASE_PUBLIC_URL}&sslmode=require"
+   else
+     MIGRATE_URL="${DATABASE_PUBLIC_URL}?sslmode=require"
+   fi
+
+   DATABASE_URL="$MIGRATE_URL" npx prisma migrate status
    ```
+   Once schema verification passes, disable Public Networking on the PostgreSQL service if external access is no longer required.
 4. **Restore MongoDB Atlas Snapshot (If Telemetry/Recipes Affected)**:
    - In MongoDB Atlas Console → **Clusters** → **Backup** → Select snapshot prior to deployment timestamp → Click **Restore**.
 5. **Restart Backend & Re-Verify Health**:
@@ -95,7 +119,7 @@ If data was corrupted or incompatible column drops were committed:
      ```bash
      curl -i https://<BACKEND_HOST>/api/v1/health/readiness
      ```
-   - Verify HTTP 200 `{ status: "ready" }` before resuming client traffic.
+     Verify HTTP 200 `{ status: "ready" }` before resuming client traffic.
 
 ---
 

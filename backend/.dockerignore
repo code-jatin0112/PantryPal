@@ -11,6 +11,9 @@ npm-debug.log*
 tests
 coverage
 
+# Local Prisma client output; the image generates its own
+src/generated/prisma
+
 # Version control & OS metadata
 .git
 .gitignore

@@ -111,31 +111,54 @@ When deploying a release that contains new Prisma migrations:
    ```bash
    pg_dump -h <HOST> -U <USER> -d pantrypal -Fc -f backup_pre_release_$(date +%Y%m%d_%H%M%S).dump
    ```
-3. **Run Migrations via Verified Network Path**:
+3. **Execute Migrations via Verified Network Path**:
    > [!IMPORTANT]
-   > Railway PostgreSQL is isolated inside the Railway private network by default (`*.railway.internal`). A local `railway run` invoked on an operator workstation cannot resolve this internal hostname. Choose one of the verified execution options:
+   > Railway PostgreSQL is isolated inside the Railway private virtual network by default (`*.railway.internal`). Note that `railway run` executes commands on the **operator's local workstation** (pulling down environment variables) — it does **NOT** execute inside Railway's private network. Because `*.railway.internal` hostnames cannot resolve on local machines, running `railway run ...` locally against private hostnames will fail.
+   > 
+   > Choose one of the following verified execution methods:
 
-   - **Option A (Preferred — Run Inside Railway Private Network)**:
-     Execute a one-off execution within Railway infrastructure where the internal DNS resolves:
-     ```bash
-     railway run --service backend npm run db:migrate:deploy
+   - **Option A (Recommended — Automated Private-Network Pre-Deploy Migration)**:
+     Configure Railway's built-in **Pre-Deploy Command** in `backend/railway.json`:
+     ```json
+     {
+       "deploy": {
+         "startCommand": "npm start",
+         "preDeployCommand": "npm run db:migrate:deploy"
+       }
+     }
      ```
-     *(Alternatively, configure `"preDeployCommand": "npx prisma migrate deploy"` in `backend/railway.json` to execute inside an ephemeral container before container cutover).*
-   - **Option B (Authorized External Connection with Mandatory TLS)**:
-     Enable **Public Networking** on the PostgreSQL service in the Railway dashboard, then run the command passing `DATABASE_PUBLIC_URL` with explicit SSL:
-     ```bash
-     DATABASE_URL="${DATABASE_PUBLIC_URL}?sslmode=require" npm run db:migrate:deploy
-     ```
-4. **Verify Applied Migrations**:
-   Confirm migration table state using the same reachable network path:
-   ```bash
-   # Via Railway private network:
-   railway run --service backend npm run db:migrate:status
+     **Execution Lifecycle & Order**:
+     1. **Build**: Railway builds the production container using `backend/Dockerfile`.
+     2. **Pre-Deploy Migration**: Before any new containers are started or traffic shifted, Railway spins up an ephemeral container inside Railway's private network using the newly built image and executes `npm run db:migrate:deploy`. This container has native access to `DATABASE_URL` resolving to `postgres.railway.internal`.
+     3. **Deploy (Traffic Cutover)**: Only when the pre-deploy command succeeds (exit code `0`) does Railway proceed to start the new backend service container (`npm start`) and route traffic.
+     4. **Failure Guard**: If `db:migrate:deploy` fails or exits non-zero, Railway **aborts the deployment immediately**. The existing running application container remains untouched and continues serving traffic without downtime or broken schema.
+     5. **Verification**: Inspect the deployment logs in the Railway Dashboard under the **Deployments** tab to review the pre-deploy migration step logs.
 
-   # Or via authorized external connection:
-   DATABASE_URL="${DATABASE_PUBLIC_URL}?sslmode=require" npm run db:migrate:status
-   ```
-5. **Deploy Updated Application Image**: Railway rolls out the new container version once migrations are verified.
+   - **Option B (Alternative — Authorized External Connection with Mandatory TLS)**:
+     If manual out-of-band schema inspection (`db:migrate:status`) or emergency migration resolution is required from an operator workstation, prefer private-network execution whenever possible rather than unnecessarily exposing PostgreSQL to the public internet. If external access is necessary:
+     1. In the Railway Dashboard → PostgreSQL Service → **Settings** → **Networking** → Click **Enable Public Networking**.
+     2. Railway assigns a public TCP proxy domain and port, and generates the `DATABASE_PUBLIC_URL` variable on the PostgreSQL service. Note that this variable is stored in Railway and is **not automatically set in your local shell**.
+     3. Copy `DATABASE_PUBLIC_URL` from the Railway Dashboard (or retrieve it via `railway variables --service PostgreSQL`) and export it in your operator terminal:
+        ```bash
+        export DATABASE_PUBLIC_URL="postgresql://postgres:<PASSWORD>@<PROXY_HOST>:<PORT>/railway"
+        ```
+     4. **TLS & Query Parameter Handling**: Enforce TLS (`sslmode=require`) and handle URL parameters safely to avoid malformed query strings if `DATABASE_PUBLIC_URL` already includes parameters:
+        ```bash
+        # Safely append sslmode=require handling existing query params
+        if [[ "$DATABASE_PUBLIC_URL" == *"?"* ]]; then
+          MIGRATE_URL="${DATABASE_PUBLIC_URL}&sslmode=require"
+        else
+          MIGRATE_URL="${DATABASE_PUBLIC_URL}?sslmode=require"
+        fi
+
+        # Check migration status before deploying:
+        DATABASE_URL="$MIGRATE_URL" npm run db:migrate:status
+
+        # If applying manually:
+        DATABASE_URL="$MIGRATE_URL" npm run db:migrate:deploy
+        ```
+     5. **Disable Public Networking**: Immediately toggle off Public Networking on the PostgreSQL service in the Railway Dashboard once the maintenance task is complete to maintain zero-trust isolation.
+4. **Deploy Updated Application Image**: Railway rolls out the new container version once migrations succeed.
 
 ### 4.3 Database Backup & Restore Plan
 - **PostgreSQL**:
