@@ -25,6 +25,7 @@ import aiRecommendationRoutes from "./routes/aiRecommendationRoutes.js";
 import recipeServingScalingRoutes from "./routes/recipeServingScalingRoutes.js";
 import userPreferenceRoutes from "./routes/userPreferenceRoutes.js";
 import aiChatRoutes from "./routes/aiChatRoutes.js";
+import healthRoutes from "./routes/healthRoutes.js";
 
 const app = express();
 
@@ -41,15 +42,8 @@ app.use(getCorsOptions());
 app.use(getRateLimiter());
 app.use(express.json({ limit: "1mb" }));
 
-// Health Check
-app.get("/api/v1/health", (req, res) => {
-  res.status(200).json({
-    success: true,
-    data: {
-      status: "healthy",
-    },
-  });
-});
+// Health & Readiness Checks
+app.use("/api/v1/health", healthRoutes);
 
 // Application Routes
 app.use("/api/v1/auth", authRoutes);

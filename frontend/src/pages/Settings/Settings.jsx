@@ -742,10 +742,18 @@ const Settings = () => {
                 >
                   <div className="divide-y divide-[rgba(138,144,112,0.10)]">
                     <ToggleSwitch
-                      label="Two-Factor Authentication (2FA)"
-                      description="Require an authentication code when signing into your PantryPal chef account"
-                      checked={settings.twoFactorAuth}
-                      onChange={(val) => updateSetting('twoFactorAuth', val)}
+                      label={
+                        <span className="flex items-center gap-2">
+                          <span>Two-Factor Authentication (2FA)</span>
+                          <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-[var(--color-sage)]/15 text-[var(--color-sage)]">
+                            Coming Soon
+                          </span>
+                        </span>
+                      }
+                      description="Hardware security keys and TOTP authenticator app support are in development"
+                      checked={false}
+                      disabled={true}
+                      onChange={() => {}}
                     />
                     <ToggleSwitch
                       label="Anonymous Kitchen Analytics"
@@ -758,7 +766,7 @@ const Settings = () => {
                   <div className="pt-3 border-t border-[rgba(138,144,112,0.10)] flex items-center justify-between">
                     <div>
                       <h4 className="text-xs font-bold text-[var(--color-dark)]">Account Password</h4>
-                      <p className="text-[11px] text-[var(--color-sage)] font-medium">Last changed 2 weeks ago</p>
+                      <p className="text-[11px] text-[var(--color-sage)] font-medium">Managed via PantryPal authentication</p>
                     </div>
                     <Button
                       variant="secondary"

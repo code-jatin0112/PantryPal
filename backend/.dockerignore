@@ -1,0 +1,21 @@
+# Dependencies
+node_modules
+npm-debug.log*
+
+# Environment files with credentials
+.env
+.env.*
+!.env.example
+
+# Test suites and test coverage
+tests
+coverage
+
+# Local Prisma client output; the image generates its own
+src/generated/prisma
+
+# Version control & OS metadata
+.git
+.gitignore
+.DS_Store
+*.md
